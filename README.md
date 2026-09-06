@@ -4,7 +4,7 @@ NEXA is an organizational knowledge intelligence concept that turns questions an
 
 ## Current Stage
 
-Agent foundation: minimal React question form, Express health/chat endpoints, shared contracts, and a deterministic FakeAgentProvider. Botpress integration, SQLite persistence, Knowledge Gaps, product workflows, authentication, final UI, Tailwind/shadcn, and Docker are not implemented. Fake responses demonstrate development integration, not live AI behavior.
+First knowledge-domain slice: SQLite query logging, detected Knowledge Gaps, deterministic deduplication, read endpoints, and the minimal React question form. FakeAgentProvider remains active. Botpress integration, Knowledge Operations mutations, evidence collection, drafts, approvals, publication, analytics dashboards, authentication, final UI, Tailwind/shadcn, and Docker are not implemented. Fake responses demonstrate development integration, not live AI behavior.
 
 ## Prerequisites
 
@@ -59,7 +59,7 @@ Defaults work without environment files. `.env.example` lists optional **shell**
 
 ## Deterministic Chat Development
 
-`POST /api/chat` accepts `{"message":"..."}`. Use the question form and Send button at the local web URL. Temporary UUIDs identify responses only; queries and gaps are not saved and `knowledgeGapId` is omitted. Controllers/services depend on AgentProvider; only server composition selects FakeAgentProvider. Draft generation is deferred.
+`POST /api/chat` accepts `{"message":"...","clientSessionId":"optional-uuid"}`. Use the question form and Send button at the local web URL. Each valid submission receives a persisted Query UUID, including non-organizational questions and controlled provider failures. Only relevant INSUFFICIENT assessments with completed retrieval create/reuse a gap and return `knowledgeGapId`. Controllers/services depend on AgentProvider and a repository boundary; only server composition selects FakeAgentProvider and SQLite. Draft generation is deferred.
 
 | Example | Result |
 | --- | --- |
@@ -72,7 +72,23 @@ Spanish is primary for visible examples, default questions, and demo response te
 
 Only the small explicit English/Spanish fixture aliases are recognized. Other questions (including greetings and unsupported organizational questions) return the out-of-scope development response; this fake is not a general relevance classifier. It makes no external calls. No proposed action is executed.
 
-**Task-specific contract differences:** this implementation follows the agent-foundation request's `message` input and `evidence` output rather than the provisional `question`/`sources` fields in API_CONTRACTS.md. Responses add status/relevance/suggestions. Successful nonpersistent assessments use 200 rather than the future persisted-query 201. Valid non-organizational questions also return 200: relevance is a domain assessment, not an HTTP validation error. Their structured ChatResponse is preserved, including existing OUT_OF_SCOPE metadata. Provider failures return 503 with a structured ChatResponse and provider-neutral error. Invalid messages/malformed JSON return 400 with only `error`; oversized bodies return 413. Existing `/api/health` is unchanged.
+**Task-specific contract differences:** this implementation keeps the agent-foundation request's `message` input and `evidence` output rather than the provisional `question`/`sources` fields. Successful assessments retain HTTP 200, including non-organizational questions. Their structured response keeps existing OUT_OF_SCOPE metadata. Provider failures remain 503 and are now logged with FAILURE status; invalid messages/malformed JSON return 400 and are not logged (oversized bodies: 413). This persistence task explicitly supersedes the earlier plan not to log unrelated/failed attempts. Future knowledge metrics must filter these records rather than count them as missing organizational knowledge. Database failures return a sanitized 500 PERSISTENCE_ERROR; no successful save or partial occurrence increment is claimed. `/api/health` is unchanged.
+
+## SQLite and Read Endpoints
+
+The API creates `data/nexa.db` under the repository root on startup using better-sqlite3, without an ORM. Set the shell variable `DATABASE_PATH` to override it; relative paths are always repository-root relative in development and compiled runs. `.env.example` documents the default without creating an environment file. Database files are ignored by Git.
+
+Schema version 2 is initialized transactionally using SQLite `user_version`; version 1 databases are migrated in place. Two tables store queries and gaps; evidence references and suggestion arrays use JSON. A foreign key links queries to gaps, and a partial unique index allows only one non-RESOLVED gap per normalized key. Gap creation/increment and query insertion commit in one synchronous transaction after assessment; failure rolls back both.
+
+Matching lowercases, removes accents, normalizes punctuation (including Spanish punctuation) to spaces, trims, and collapses whitespace. Explicit Spanish/English toner and printer-retirement aliases share canonical keys. Titles preserve the first question independently of matching. New gaps are DETECTED/MEDIUM with occurrences 1. The development frontend stores an anonymous UUID in `localStorage` and sends it as the optional `clientSessionId`. For the same session and gap, eligible queries within five minutes of the last counted occurrence are all persisted but do not increase demand; another session or a later query increments it. Each Query records whether it counted toward the gap. When `clientSessionId` is absent, each eligible query increments as before, preserving compatibility for API clients. IP addresses are not collected or used. No semantic/vector matching is used.
+
+- `GET /api/queries`: `{ "items": [...] }`, newest first; includes statuses, relevance, evidence, and nullable gap links.
+- `GET /api/knowledge-gaps`: `{ "items": [...] }`, newest updated first; optional documented lifecycle `?status=DETECTED` filter.
+- `GET /api/knowledge-gaps/:id`: a gap object, or 404 NOT_FOUND.
+
+No gap mutation endpoints exist. The frontend shows the returned gap ID only.
+
+To reset local demo data, stop the API, remove only the configured SQLite database file and its matching `-journal`, `-wal`, and `-shm` sidecars if present, then restart. With defaults these are under the root `data/` directory. This deletes local demo queries/gaps; verify the configured path before deleting. Tests use in-memory or isolated temporary databases and never access the development database.
 
 ## Checks
 

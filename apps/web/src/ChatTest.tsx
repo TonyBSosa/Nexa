@@ -2,6 +2,16 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import type { ApiErrorResponse, ChatRequest, ChatResponse } from '@nexa/shared';
 
+const clientSessionStorageKey = 'nexa.clientSessionId';
+
+function getClientSessionId(): string {
+  const existing = localStorage.getItem(clientSessionStorageKey);
+  if (existing) return existing;
+  const created = crypto.randomUUID();
+  localStorage.setItem(clientSessionStorageKey, created);
+  return created;
+}
+
 export function ChatTest() {
   const [message, setMessage] = useState('¿Qué tóner utiliza la impresora MX550?');
   const [result, setResult] = useState<ChatResponse | null>(null);
@@ -14,7 +24,7 @@ export function ChatTest() {
     setError('');
     setResult(null);
     try {
-      const request: ChatRequest = { message };
+      const request: ChatRequest = { message, clientSessionId: getClientSessionId() };
       const response = await fetch('/api/chat', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request), signal: AbortSignal.timeout(10000),
@@ -32,7 +42,7 @@ export function ChatTest() {
   return (
     <section aria-labelledby="chat-heading" lang="es">
       <h2 id="chat-heading">Prueba de desarrollo del agente</h2>
-      <p>FakeAgentProvider: ejemplos sintéticos deterministas, sin IA en vivo. No se guarda información.</p>
+      <p>FakeAgentProvider: ejemplos sintéticos deterministas, sin IA en vivo. Se guardan consultas y brechas detectadas.</p>
       <ul>
         <li>¿Qué tóner utiliza la impresora MX550?</li>
         <li>¿Cuál es el procedimiento de la empresa para dar de baja una impresora?</li>
@@ -53,7 +63,8 @@ export function ChatTest() {
             <dt>Respuesta</dt><dd>{result.answer}</dd>
             <dt>Conocimiento suficiente</dt><dd>{String(result.sufficientKnowledge)}</dd>
             <dt>Relevancia organizacional</dt><dd>{result.organizationallyRelevant === null ? 'Desconocida' : String(result.organizationallyRelevant)}</dd>
-            <dt>ID temporal de consulta</dt><dd>{result.queryId}</dd>
+            <dt>ID de consulta</dt><dd>{result.queryId}</dd>
+            {result.knowledgeGapId && <><dt>ID de brecha de conocimiento</dt><dd>{result.knowledgeGapId}</dd></>}
           </dl>
           <h3>Evidencia</h3>
           {result.evidence.length ? <ul>{result.evidence.map((item) => <li key={`${item.sourceId}/${item.documentId ?? item.title}`}>{item.title} ({item.sourceId})</li>)}</ul> : <p>No se recibió evidencia.</p>}

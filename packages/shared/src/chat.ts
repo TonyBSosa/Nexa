@@ -54,6 +54,7 @@ export type QuestionAssessment =
 
 export interface ChatRequest {
   message: string;
+  clientSessionId?: string;
 }
 
 export interface ChatResponse extends RecoverySuggestions {

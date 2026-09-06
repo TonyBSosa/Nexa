@@ -4,16 +4,24 @@ import { healthRouter } from './routes/health.js';
 import { createChatRouter } from './routes/chat.js';
 import { ChatService } from './services/chat.js';
 import type { AgentProvider } from './integrations/agent/AgentProvider.js';
+import { PersistenceError } from './repositories/knowledge.js';
+import type { KnowledgeRepository } from './repositories/knowledge.js';
+import { createKnowledgeRouter } from './routes/knowledge.js';
 
-export function createApp(provider: AgentProvider) {
+export function createApp(provider: AgentProvider, repository: KnowledgeRepository) {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '16kb' }));
   app.use('/api', healthRouter);
-  app.use('/api', createChatRouter(new ChatService(provider)));
+  app.use('/api', createChatRouter(new ChatService(provider, repository)));
+  app.use('/api', createKnowledgeRouter(repository));
   const handleError: ErrorRequestHandler = (error: unknown, _request, response, _next) => {
     // Express identifies error middleware by its four-argument signature.
     void _next;
+    if (error instanceof PersistenceError) {
+      response.status(500).json({ error: { code: 'PERSISTENCE_ERROR', message: error.message } });
+      return;
+    }
     const type = typeof error === 'object' && error !== null && 'type' in error ? error.type : undefined;
     if (type === 'entity.parse.failed' || type === 'entity.too.large') {
       response.status(type === 'entity.too.large' ? 413 : 400).json({

@@ -7,6 +7,8 @@ import { ChatService, InvalidChatRequest } from '../src/services/chat.js';
 import { createApp } from '../src/app.js';
 import type { AgentProvider } from '../src/integrations/agent/AgentProvider.js';
 import type { ChatResponse } from '@nexa/shared';
+import { openDatabase } from '../src/persistence/database.js';
+import { SQLiteKnowledgeRepository } from '../src/repositories/knowledge.js';
 
 const provider = new FakeAgentProvider(true);
 const sufficient = '¿Qué tóner utiliza la impresora MX550?';
@@ -54,8 +56,10 @@ test('explicit failure is controlled and only enabled by development wiring', as
   assert.notEqual((await new FakeAgentProvider().assessQuestion({ question: 'simular fallo del agente' })).status, 'FAILURE');
 });
 
-test('service preserves result distinctions and emits unique temporary IDs without gaps', async () => {
-  const service = new ChatService(provider);
+test('service preserves result distinctions and persists unique IDs with eligible gaps only', async (t) => {
+  const db = openDatabase(':memory:');
+  t.after(() => db.close());
+  const service = new ChatService(provider, new SQLiteKnowledgeRepository(db));
   const ids = new Set<string>();
   for (const [message, status, relevance] of [
     [sufficient, 'SUFFICIENT', true], [insufficient, 'INSUFFICIENT', true],
@@ -65,18 +69,20 @@ test('service preserves result distinctions and emits unique temporary IDs witho
     assert.equal(response.status, status);
     assert.equal(response.organizationallyRelevant, relevance);
     assert.equal(response.sufficientKnowledge, status === 'SUFFICIENT');
-    assert.equal('knowledgeGapId' in response, false);
+    assert.equal('knowledgeGapId' in response, status === 'INSUFFICIENT' && relevance === true);
     assert.match(response.queryId, /^[0-9a-f-]{36}$/);
     ids.add(response.queryId);
   }
   assert.equal(ids.size, 4);
 });
 
-test('service validates requests before invoking provider and sanitizes thrown failures', async () => {
+test('service validates requests before invoking provider and sanitizes thrown failures', async (t) => {
+  const db = openDatabase(':memory:');
+  t.after(() => db.close());
   let calls = 0;
   const throwing: AgentProvider = { assessQuestion: async () => { calls++; throw new Error('private provider detail'); } };
-  const service = new ChatService(throwing);
-  for (const input of [null, {}, [], { message: '' }, { message: '  ' }, { message: 7 }, { question: sufficient }, { message: sufficient, extra: true }]) {
+  const service = new ChatService(throwing, new SQLiteKnowledgeRepository(db));
+  for (const input of [null, {}, [], { message: '' }, { message: '  ' }, { message: 7 }, { question: sufficient }, { message: sufficient, extra: true }, { message: sufficient, clientSessionId: 'invalid' }]) {
     await assert.rejects(service.chat(input), InvalidChatRequest);
   }
   assert.equal(calls, 0);
@@ -87,7 +93,9 @@ test('service validates requests before invoking provider and sanitizes thrown f
 });
 
 test('HTTP contract: health, structured outcomes, validation, malformed JSON, and failure', async (t) => {
-  const server = createApp(provider).listen(0, '127.0.0.1');
+  const db = openDatabase(':memory:');
+  t.after(() => db.close());
+  const server = createApp(provider, new SQLiteKnowledgeRepository(db)).listen(0, '127.0.0.1');
   t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
   await once(server, 'listening');
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -103,7 +111,7 @@ test('HTTP contract: health, structured outcomes, validation, malformed JSON, an
     const body = await response.json() as ChatResponse;
     assert.equal(body.status, assessmentStatus);
     assert.equal(typeof body.queryId, 'string');
-    assert.equal('knowledgeGapId' in body, false);
+    assert.equal('knowledgeGapId' in body, message === insufficient);
     assert.ok(Array.isArray(body.evidence));
     if (message === '¿Cuál es la capital de Francia?') {
       assert.equal(body.organizationallyRelevant, false);
