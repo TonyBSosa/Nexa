@@ -1,34 +1,20 @@
-import type { QuestionAssessment } from '@nexa/shared';
+import type { AssessQuestionInput, DraftGenerationInput, DraftGenerationResult, QuestionAssessment } from '@nexa/shared';
 import type { AgentProvider } from './AgentProvider.js';
 
-function normalize(question: string): string {
-  return question.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ').trim().replace(/\s+/g, ' ');
-}
+import { normalizeQuestion as normalize, questionKey } from '../../domain/questionKey.js';
 
-const tonerQuestions = new Set([
-  '¿Qué tóner utiliza la impresora MX550?',
-  'What toner does the MX550 printer use?',
-  'What toner does the MX550 use?',
-  'Which toner is used by the MX550 printer?',
-  '¿Qué tóner usa la impresora MX550?',
-  '¿Qué tóner utiliza la MX550?',
-  '¿Cuál es el tóner de la impresora MX550?',
-].map(normalize));
-
-const retirementQuestions = new Set([
-  'What is the company procedure for retiring a printer?',
-  'What is the company procedure for decommissioning a printer?',
-  'How do we retire a printer?',
-  '¿Cuál es el procedimiento de la empresa para dar de baja una impresora?',
-  '¿Cómo se da de baja una impresora?',
-  '¿Cómo retirar una impresora de la empresa?',
-].map(normalize));
+const tonerKey = questionKey('What toner does the MX550 use?');
+const retirementKey = questionKey('How do we retire a printer?');
 
 export class FakeAgentProvider implements AgentProvider {
   constructor(private readonly allowFailureSimulation = false) {}
 
-  assessQuestion({ question }: { question: string }): Promise<QuestionAssessment> {
+  assessQuestion({ question, approvedKnowledge = [] }: AssessQuestionInput): Promise<QuestionAssessment> {
+    const approved = approvedKnowledge.find((item) => item.normalizedQuestionKey === questionKey(question));
+    if (approved) return Promise.resolve({
+      status: 'SUFFICIENT', organizationallyRelevant: true, retrievalCompleted: true,
+      answer: approved.content, evidence: [approved.reference],
+    });
     const key = normalize(question);
     if (this.allowFailureSimulation && ['simular fallo del agente', 'simulate agent failure'].includes(key)) {
       return Promise.resolve({
@@ -36,7 +22,7 @@ export class FakeAgentProvider implements AgentProvider {
         retrievalCompleted: false, answer: null, evidence: [],
       });
     }
-    if (tonerQuestions.has(key)) {
+    if (questionKey(question) === tonerKey) {
       return Promise.resolve({
         status: 'SUFFICIENT', organizationallyRelevant: true,
         retrievalCompleted: true,
@@ -44,7 +30,7 @@ export class FakeAgentProvider implements AgentProvider {
         evidence: [{ sourceId: 'synthetic-equipment', title: 'Guía interna de equipos (sintética)', documentId: 'mx550-demo' }],
       });
     }
-    if (retirementQuestions.has(key)) {
+    if (questionKey(question) === retirementKey) {
       return Promise.resolve({
         status: 'INSUFFICIENT', organizationallyRelevant: true,
         retrievalCompleted: true, answer: null, evidence: [],
@@ -62,6 +48,24 @@ export class FakeAgentProvider implements AgentProvider {
     return Promise.resolve({
       status: 'INSUFFICIENT', organizationallyRelevant: false,
       retrievalCompleted: false, answer: null, evidence: [],
+    });
+  }
+
+  generateKnowledgeDraft(input: DraftGenerationInput): Promise<DraftGenerationResult> {
+    if (this.allowFailureSimulation && input.evidence.some((item) => normalize(item.content).includes('simular fallo del agente'))) {
+      return Promise.resolve({ status: 'FAILURE' });
+    }
+    if (!input.evidence.length || input.evidence.some((item) => !item.content.trim())) {
+      return Promise.resolve({ status: 'FAILURE' });
+    }
+    const statements = input.evidence.flatMap((item) => item.content
+      .split(/(?<=[.!?])\s+/)
+      .map((statement) => statement.trim())
+      .filter(Boolean));
+    return Promise.resolve({
+      status: 'SUCCESS',
+      title: `Procedimiento: ${input.knowledgeGap.title}`,
+      content: ['Información recopilada para este procedimiento:', ...statements.map((statement, index) => `${index + 1}. ${statement}`)].join('\n'),
     });
   }
 }

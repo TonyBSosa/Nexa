@@ -95,7 +95,7 @@ test('display titles do not control matching and resolved gaps are not reused', 
   const first = await service.chat({ message: question });
   db.prepare('UPDATE knowledge_gaps SET title = ? WHERE id = ?').run('Título revisado', first.knowledgeGapId);
   assert.equal((await service.chat({ message: alias })).knowledgeGapId, first.knowledgeGapId);
-  // Seed a future state directly: no transition endpoint is implemented.
+  // Isolated matching fixture, deliberately bypassing workflow; publication is tested in operations.test.ts.
   db.prepare("UPDATE knowledge_gaps SET status = 'RESOLVED' WHERE id = ?").run(first.knowledgeGapId);
   const next = await service.chat({ message: question });
   assert.notEqual(next.knowledgeGapId, first.knowledgeGapId);
@@ -116,7 +116,7 @@ test('incomplete retrieval is a failure, not missing knowledge', async (t) => {
   const { repository } = fixture(t);
   const service = new ChatService({ assessQuestion: async () => ({
     status: 'INSUFFICIENT', organizationallyRelevant: true, retrievalCompleted: false, answer: null, evidence: [],
-  }) }, repository);
+  }), generateKnowledgeDraft: async () => ({ status: 'FAILURE' }) }, repository);
   assert.equal((await service.chat({ message: question })).status, 'FAILURE');
   assert.equal(repository.listQueries()[0]?.assessmentStatus, 'FAILURE');
   assert.equal(repository.listGaps().length, 0);

@@ -8,7 +8,7 @@ export function openDatabase(path: string): Database.Database {
   try {
     db.pragma('foreign_keys = ON');
     const version = db.pragma('user_version', { simple: true });
-    if (version !== 0 && version !== 1 && version !== 2) throw new Error('Unsupported database schema version.');
+    if (version !== 0 && version !== 1 && version !== 2 && version !== 3) throw new Error('Unsupported database schema version.');
     if (version === 0) db.transaction(() => {
       db.exec(`
         CREATE TABLE knowledge_gaps (
@@ -20,9 +20,11 @@ export function openDatabase(path: string): Database.Database {
           status TEXT NOT NULL CHECK (status IN ('DETECTED','TRIAGED','ACTION_PROPOSED','IN_PROGRESS','KNOWLEDGE_COLLECTED','AWAITING_APPROVAL','PUBLISHED','RESOLVED')),
           priority TEXT NOT NULL CHECK (priority IN ('LOW','MEDIUM','HIGH')),
           occurrences INTEGER NOT NULL CHECK (occurrences >= 1),
+          evidenceRevision INTEGER NOT NULL DEFAULT 0 CHECK (evidenceRevision >= 0),
           suggestedDepartment TEXT,
           suggestedExperts TEXT NOT NULL,
           suggestedActions TEXT NOT NULL,
+          selectedAction TEXT,
           createdAt TEXT NOT NULL,
           updatedAt TEXT NOT NULL
         );
@@ -44,7 +46,48 @@ export function openDatabase(path: string): Database.Database {
         );
         CREATE INDEX queries_by_gap ON queries(knowledgeGapId);
         CREATE INDEX queries_by_session_gap_time ON queries(clientSessionId, knowledgeGapId, createdAt);
-        PRAGMA user_version = 2;
+        CREATE TABLE collected_evidence (
+          id TEXT PRIMARY KEY,
+          knowledgeGapId TEXT NOT NULL REFERENCES knowledge_gaps(id),
+          content TEXT NOT NULL,
+          sourceType TEXT NOT NULL CHECK (sourceType = 'MANUAL'),
+          sourceLabel TEXT NOT NULL,
+          reference TEXT,
+          revision INTEGER NOT NULL CHECK (revision > 0),
+          createdAt TEXT NOT NULL,
+          UNIQUE (knowledgeGapId, revision)
+        );
+        CREATE TABLE knowledge_drafts (
+          id TEXT PRIMARY KEY,
+          knowledgeGapId TEXT NOT NULL REFERENCES knowledge_gaps(id),
+          revision INTEGER NOT NULL CHECK (revision > 0),
+          evidenceRevisionUsed INTEGER NOT NULL CHECK (evidenceRevisionUsed > 0),
+          title TEXT NOT NULL,
+          content TEXT NOT NULL,
+          createdAt TEXT NOT NULL,
+          updatedAt TEXT NOT NULL,
+          UNIQUE (knowledgeGapId, revision)
+        );
+        CREATE TABLE approvals (
+          id TEXT PRIMARY KEY,
+          knowledgeGapId TEXT NOT NULL REFERENCES knowledge_gaps(id),
+          decision TEXT NOT NULL CHECK (decision IN ('APPROVED','CHANGES_REQUESTED','REJECTED')),
+          draftRevision INTEGER NOT NULL CHECK (draftRevision > 0),
+          comment TEXT,
+          createdAt TEXT NOT NULL,
+          UNIQUE (knowledgeGapId, draftRevision)
+        );
+        CREATE TABLE approved_knowledge (
+          articleId TEXT PRIMARY KEY,
+          sourceKnowledgeGapId TEXT NOT NULL UNIQUE REFERENCES knowledge_gaps(id),
+          revision INTEGER NOT NULL CHECK (revision > 0),
+          title TEXT NOT NULL,
+          content TEXT NOT NULL,
+          normalizedQuestionKey TEXT NOT NULL UNIQUE,
+          approvedDraftRevision INTEGER NOT NULL CHECK (approvedDraftRevision > 0),
+          publishedAt TEXT NOT NULL
+        );
+        PRAGMA user_version = 3;
       `);
     })();
     if (version === 1) db.transaction(() => {
@@ -53,6 +96,54 @@ export function openDatabase(path: string): Database.Database {
         ALTER TABLE queries ADD COLUMN countedAsKnowledgeGapOccurrence INTEGER NOT NULL DEFAULT 0 CHECK (countedAsKnowledgeGapOccurrence IN (0,1));
         CREATE INDEX queries_by_session_gap_time ON queries(clientSessionId, knowledgeGapId, createdAt);
         PRAGMA user_version = 2;
+      `);
+    })();
+    if (version === 1 || version === 2) db.transaction(() => {
+      db.exec(`
+        ALTER TABLE knowledge_gaps ADD COLUMN evidenceRevision INTEGER NOT NULL DEFAULT 0 CHECK (evidenceRevision >= 0);
+        ALTER TABLE knowledge_gaps ADD COLUMN selectedAction TEXT;
+        CREATE TABLE collected_evidence (
+          id TEXT PRIMARY KEY,
+          knowledgeGapId TEXT NOT NULL REFERENCES knowledge_gaps(id),
+          content TEXT NOT NULL,
+          sourceType TEXT NOT NULL CHECK (sourceType = 'MANUAL'),
+          sourceLabel TEXT NOT NULL,
+          reference TEXT,
+          revision INTEGER NOT NULL CHECK (revision > 0),
+          createdAt TEXT NOT NULL,
+          UNIQUE (knowledgeGapId, revision)
+        );
+        CREATE TABLE knowledge_drafts (
+          id TEXT PRIMARY KEY,
+          knowledgeGapId TEXT NOT NULL REFERENCES knowledge_gaps(id),
+          revision INTEGER NOT NULL CHECK (revision > 0),
+          evidenceRevisionUsed INTEGER NOT NULL CHECK (evidenceRevisionUsed > 0),
+          title TEXT NOT NULL,
+          content TEXT NOT NULL,
+          createdAt TEXT NOT NULL,
+          updatedAt TEXT NOT NULL,
+          UNIQUE (knowledgeGapId, revision)
+        );
+        CREATE TABLE approvals (
+          id TEXT PRIMARY KEY,
+          knowledgeGapId TEXT NOT NULL REFERENCES knowledge_gaps(id),
+          decision TEXT NOT NULL CHECK (decision IN ('APPROVED','CHANGES_REQUESTED','REJECTED')),
+          draftRevision INTEGER NOT NULL CHECK (draftRevision > 0),
+          comment TEXT,
+          createdAt TEXT NOT NULL,
+          UNIQUE (knowledgeGapId, draftRevision)
+        );
+        CREATE TABLE approved_knowledge (
+          articleId TEXT PRIMARY KEY,
+          sourceKnowledgeGapId TEXT NOT NULL UNIQUE REFERENCES knowledge_gaps(id),
+          revision INTEGER NOT NULL CHECK (revision > 0),
+          title TEXT NOT NULL,
+          content TEXT NOT NULL,
+          normalizedQuestionKey TEXT NOT NULL UNIQUE,
+          approvedDraftRevision INTEGER NOT NULL CHECK (approvedDraftRevision > 0),
+          publishedAt TEXT NOT NULL
+        );
+        PRAGMA user_version = 3;
       `);
     })();
     return db;

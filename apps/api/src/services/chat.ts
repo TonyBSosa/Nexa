@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { ChatRequest, ChatResponse, QuestionAssessment } from '@nexa/shared';
 import type { AgentProvider } from '../integrations/agent/AgentProvider.js';
 import type { KnowledgeRepository } from '../repositories/knowledge.js';
+import { questionKey } from '../domain/questionKey.js';
+import { validateAssessment } from '../integrations/agent/validation.js';
 
 export class InvalidChatRequest extends Error {}
 
@@ -27,15 +29,20 @@ export class ChatService {
   async chat(input: unknown): Promise<ChatResponse> {
     const request = parseRequest(input);
     const queryId = randomUUID();
-    let assessment: QuestionAssessment;
+    const approved = this.repository.findApprovedKnowledge(questionKey(request.message));
+    let raw: unknown;
     try {
-      assessment = await this.provider.assessQuestion({ question: request.message });
+      raw = await this.provider.assessQuestion({ question: request.message, approvedKnowledge: approved ? [{
+        normalizedQuestionKey: approved.normalizedQuestionKey, content: approved.content,
+        reference: { sourceId: 'nexa-approved', title: approved.title, articleId: approved.articleId, articleRevision: approved.revision },
+      }] : [] });
     } catch {
-      assessment = {
+      raw = {
         status: 'FAILURE', organizationallyRelevant: null,
         retrievalCompleted: false, answer: null, evidence: [],
       };
     }
+    let assessment = validateAssessment(raw);
     if (assessment.organizationallyRelevant === true && !assessment.retrievalCompleted) {
       assessment = { status: 'FAILURE', organizationallyRelevant: null, retrievalCompleted: false, answer: null, evidence: [] };
     }
@@ -43,6 +50,11 @@ export class ChatService {
     const eligible = assessment.status === 'INSUFFICIENT'
       && assessment.organizationallyRelevant === true && assessment.retrievalCompleted;
     const query = this.repository.record(request.message, response, eligible, request.clientSessionId);
+    // The transaction may replace an in-flight provider outcome with newly published knowledge.
+    if (query.sufficientKnowledge) return {
+      queryId: query.id, status: 'SUFFICIENT', organizationallyRelevant: true,
+      sufficientKnowledge: true, answer: query.answer ?? '', evidence: query.evidence,
+    };
     if (query.knowledgeGapId) response.knowledgeGapId = query.knowledgeGapId;
     return response;
   }
