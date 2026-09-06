@@ -1,0 +1,23 @@
+{
+  "name": "nexa",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24.14.0 <25", "npm": ">=11 <12" },
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev:web": "npm run build -w @nexa/shared && npm run dev -w @nexa/web",
+    "dev:api": "npm run build -w @nexa/shared && npm run dev -w @nexa/api",
+    "build": "npm run build -w @nexa/shared && npm run build -w @nexa/api && npm run build -w @nexa/web",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "npm run build -w @nexa/shared && npm run typecheck --workspaces"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "@types/node": "^24.13.3",
+    "eslint": "^10.10.0",
+    "globals": "^17.0.0",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.69.0"
+  }
+}
