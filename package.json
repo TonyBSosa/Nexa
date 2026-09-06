@@ -10,6 +10,7 @@
     "dev:api": "npm run build -w @nexa/shared && npm run dev -w @nexa/api",
     "build": "npm run build -w @nexa/shared && npm run build -w @nexa/api && npm run build -w @nexa/web",
     "lint": "eslint . --max-warnings=0",
+    "test": "npm run build -w @nexa/shared && npm run test -w @nexa/api",
     "typecheck": "npm run build -w @nexa/shared && npm run typecheck --workspaces"
   },
   "devDependencies": {

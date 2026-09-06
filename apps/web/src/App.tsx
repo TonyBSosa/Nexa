@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { HealthResponse } from '@nexa/shared';
+import { ChatTest } from './ChatTest';
 
 export function App() {
   const [message, setMessage] = useState('API not checked.');
@@ -29,6 +30,7 @@ export function App() {
     <main>
       <h1>NEXA</h1>
       <p>Technical foundation ready</p>
+      <ChatTest />
       {import.meta.env.DEV && (
         <section aria-label="Development health check">
           <button onClick={() => void checkHealth()} disabled={checking}>
