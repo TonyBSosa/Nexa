@@ -6,6 +6,8 @@ export interface EvidenceReference {
   title: string;
   documentId?: string;
   locator?: string;
+  articleId?: string;
+  articleRevision?: number;
 }
 
 export type SuggestedActionType =
@@ -55,6 +57,15 @@ export type QuestionAssessment =
 export interface ChatRequest {
   message: string;
   clientSessionId?: string;
+}
+
+export interface AssessQuestionInput {
+  question: string;
+  approvedKnowledge?: Array<{
+    normalizedQuestionKey: string;
+    content: string;
+    reference: EvidenceReference & { articleId: string; articleRevision: number };
+  }>;
 }
 
 export interface ChatResponse extends RecoverySuggestions {

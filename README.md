@@ -4,7 +4,7 @@ NEXA is an organizational knowledge intelligence concept that turns questions an
 
 ## Current Stage
 
-First knowledge-domain slice: SQLite query logging, detected Knowledge Gaps, deterministic deduplication, read endpoints, and the minimal React question form. FakeAgentProvider remains active. Botpress integration, Knowledge Operations mutations, evidence collection, drafts, approvals, publication, analytics dashboards, authentication, final UI, Tailwind/shadcn, and Docker are not implemented. Fake responses demonstrate development integration, not live AI behavior.
+Knowledge Recovery Loop: SQLite-backed gaps now progress through triage, simulated recovery, evidence collection, versioned drafting, human review, local publication, and explicit resolution. Published articles immediately answer matching chat questions through NEXA Approved Knowledge. FakeAgentProvider remains active; Botpress, real external actions, authentication, analytics dashboards, final UI, Tailwind/shadcn, and Docker remain pending.
 
 ## Prerequisites
 
@@ -59,7 +59,7 @@ Defaults work without environment files. `.env.example` lists optional **shell**
 
 ## Deterministic Chat Development
 
-`POST /api/chat` accepts `{"message":"...","clientSessionId":"optional-uuid"}`. Use the question form and Send button at the local web URL. Each valid submission receives a persisted Query UUID, including non-organizational questions and controlled provider failures. Only relevant INSUFFICIENT assessments with completed retrieval create/reuse a gap and return `knowledgeGapId`. Controllers/services depend on AgentProvider and a repository boundary; only server composition selects FakeAgentProvider and SQLite. Draft generation is deferred.
+`POST /api/chat` accepts `{"message":"...","clientSessionId":"optional-uuid"}`. Use the question form and Send button at the local web URL. Each valid submission receives a persisted Query UUID, including non-organizational questions and controlled provider failures. Only relevant INSUFFICIENT assessments with completed retrieval create/reuse a gap and return `knowledgeGapId`. Canonical approved knowledge is supplied to the provider as neutral context and rechecked inside the final query-write transaction. It returns grounded `nexa-approved` evidence even when a delayed provider assessment says INSUFFICIENT.
 
 | Example | Result |
 | --- | --- |
@@ -78,15 +78,26 @@ Only the small explicit English/Spanish fixture aliases are recognized. Other qu
 
 The API creates `data/nexa.db` under the repository root on startup using better-sqlite3, without an ORM. Set the shell variable `DATABASE_PATH` to override it; relative paths are always repository-root relative in development and compiled runs. `.env.example` documents the default without creating an environment file. Database files are ignored by Git.
 
-Schema version 2 is initialized transactionally using SQLite `user_version`; version 1 databases are migrated in place. Two tables store queries and gaps; evidence references and suggestion arrays use JSON. A foreign key links queries to gaps, and a partial unique index allows only one non-RESOLVED gap per normalized key. Gap creation/increment and query insertion commit in one synchronous transaction after assessment; failure rolls back both.
+Schema version 3 is initialized transactionally using SQLite `user_version`; earlier databases are migrated in place. SQLite stores queries, gaps, collected evidence, draft revisions, review decisions, and approved articles. A foreign key links queries to gaps, and a partial unique index allows only one non-RESOLVED gap per normalized key. Related workflow writes use synchronous transactions so failures do not leave partial state.
 
 Matching lowercases, removes accents, normalizes punctuation (including Spanish punctuation) to spaces, trims, and collapses whitespace. Explicit Spanish/English toner and printer-retirement aliases share canonical keys. Titles preserve the first question independently of matching. New gaps are DETECTED/MEDIUM with occurrences 1. The development frontend stores an anonymous UUID in `localStorage` and sends it as the optional `clientSessionId`. For the same session and gap, eligible queries within five minutes of the last counted occurrence are all persisted but do not increase demand; another session or a later query increments it. Each Query records whether it counted toward the gap. When `clientSessionId` is absent, each eligible query increments as before, preserving compatibility for API clients. IP addresses are not collected or used. No semantic/vector matching is used.
 
 - `GET /api/queries`: `{ "items": [...] }`, newest first; includes statuses, relevance, evidence, and nullable gap links.
 - `GET /api/knowledge-gaps`: `{ "items": [...] }`, newest updated first; optional documented lifecycle `?status=DETECTED` filter.
 - `GET /api/knowledge-gaps/:id`: a gap object, or 404 NOT_FOUND.
+- `GET /api/knowledge`: locally published NEXA Approved Knowledge articles.
 
-No gap mutation endpoints exist. The frontend shows the returned gap ID only.
+## Knowledge Operations Demo
+
+The development page includes a plain Knowledge Operations harness. Ask “¿Cuál es el procedimiento de la empresa para dar de baja una impresora?”, copy its `knowledgeGapId` into the harness, and use the controls in order:
+
+1. Save triage metadata (state stays DETECTED), then explicitly confirm review (`DETECTED → TRIAGED`).
+2. Select a proposed action, then explicitly approve starting it (`ACTION_PROPOSED → IN_PROGRESS`). The action is simulated; no email, meeting, document request, or external task is executed.
+3. Add the prefilled synthetic evidence (state stays IN_PROGRESS), explicitly confirm KNOWLEDGE_COLLECTED, and generate a versioned draft (state stays KNOWLEDGE_COLLECTED). Inspect it and explicitly submit AWAITING_APPROVAL. FakeAgentProvider builds the draft only from the supplied evidence.
+4. Approve the current fresh revision. Approval, local article publication, and `PUBLISHED` commit atomically. Changes requested or rejection return the gap to `KNOWLEDGE_COLLECTED` and require a newer draft.
+5. Ask the same question again to receive a `SUFFICIENT` response from NEXA Approved Knowledge, then explicitly close the gap (`PUBLISHED → RESOLVED`).
+
+Mutation routes are `PATCH /api/knowledge-gaps/:id/triage` and `POST` to `/:id/transition`, `/:id/evidence`, `/:id/draft`, and `/:id/approval`. Evidence revisions make older drafts stale; only the latest draft using the current evidence revision can be submitted and approved. Successful APPROVED retries reuse the same publication, including after resolution; conflicting reviews return 409. Malformed provider responses return sanitized 502 INVALID_PROVIDER_RESPONSE. Recovery actions and human decisions are persisted locally. Botpress and real Microsoft 365 or document-system integrations are not active.
 
 To reset local demo data, stop the API, remove only the configured SQLite database file and its matching `-journal`, `-wal`, and `-shm` sidecars if present, then restart. With defaults these are under the root `data/` directory. This deletes local demo queries/gaps; verify the configured path before deleting. Tests use in-memory or isolated temporary databases and never access the development database.
 

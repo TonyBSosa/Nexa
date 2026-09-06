@@ -120,7 +120,7 @@ These records capture planned MVP decisions, consistent with `AGENTS.md`, `PROJE
 
 **Decision:** Only relevant INSUFFICIENT results after successful retrieval create gaps. Match open gaps by normalizedQuestionKey with lowercase/trim/punctuation-to-space/whitespace normalization and a small explicit demo alias map.
 **Rationale:** Predictable recurrence is sufficient for the prototype.
-**Consequences:** Display titles are separate; no embeddings, confidence percentages, or separate occurrence table are required. Each accepted unanswered query is linked and counted once transactionally. Greetings, out-of-scope input, and service failures create no gap.
+**Consequences:** Display titles are separate; no embeddings, confidence percentages, or separate occurrence table are required. Each accepted unanswered query is linked transactionally. The accepted optional clientSessionId policy suppresses repeat demand increments within five minutes of the last counted occurrence per session/gap; without it each eligible submission counts. Unrelated and FAILURE attempts persist for observability but are excluded from organizational metrics. Greetings, out-of-scope input, and service failures create no gap.
 
 ## ADR-021 — Fresh drafts and explicit workflow meanings
 
@@ -133,3 +133,9 @@ These records capture planned MVP decisions, consistent with `AGENTS.md`, `PROJE
 **Decision:** Separate frontend, backend/domain, AI/Botpress, and knowledge/demo/QA work through shared DTOs, fake provider results, and deterministic fixtures.
 **Rationale:** Four people can progress independently while preserving a reproducible five-minute story.
 **Consequences:** Sources stays read-only; summaries share aggregation logic. Seed/reset local and relevant external knowledge/conversation state. Agree a fallback cutoff and prepare screenshots, known outputs, and a recording. Visibly demonstrate assessment, evidence-aware suggestions, and drafting; do not expose hidden chain-of-thought. LEARN is knowledge reuse and indicators, not training. Keep the agreed stack and defer Docker until local integration stabilizes.
+
+## ADR-023 — Knowledge Operations remediation
+
+**Decision:** Keep metadata/evidence/draft writes separate from explicit human transitions. Canonical approved content is authoritative: pass it through AssessQuestionInput and recheck it inside the immediate query-write transaction after provider work. Approval retries require APPROVED, the current revision, and a consistent publication; conflicting reviews fail.
+**Rationale:** Preserve the documented lifecycle and prevent delayed insufficient assessments from recreating demand after publication.
+**Consequences:** No provider call runs inside a SQLite transaction. Runtime validation rejects malformed provider shapes; unusable action entries are filtered and replaced with the labeled fallback when necessary. Existing message/evidence naming, HTTP 200 chat assessments, session demand suppression, and observability logging remain unchanged. The local store and FakeAgentProvider remain sufficient; no new integration or infrastructure is added.

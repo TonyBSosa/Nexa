@@ -80,7 +80,10 @@ test('service validates requests before invoking provider and sanitizes thrown f
   const db = openDatabase(':memory:');
   t.after(() => db.close());
   let calls = 0;
-  const throwing: AgentProvider = { assessQuestion: async () => { calls++; throw new Error('private provider detail'); } };
+  const throwing: AgentProvider = {
+    assessQuestion: async () => { calls++; throw new Error('private provider detail'); },
+    generateKnowledgeDraft: async () => { throw new Error('not used'); },
+  };
   const service = new ChatService(throwing, new SQLiteKnowledgeRepository(db));
   for (const input of [null, {}, [], { message: '' }, { message: '  ' }, { message: 7 }, { question: sufficient }, { message: sufficient, extra: true }, { message: sufficient, clientSessionId: 'invalid' }]) {
     await assert.rejects(service.chat(input), InvalidChatRequest);
