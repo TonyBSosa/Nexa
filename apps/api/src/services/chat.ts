@@ -3,6 +3,8 @@ import type { ChatRequest, ChatResponse, QuestionAssessment } from '@nexa/shared
 import type { AgentProvider } from '../integrations/agent/AgentProvider.js';
 import type { KnowledgeRepository } from '../repositories/knowledge.js';
 import { questionKey } from '../domain/questionKey.js';
+import { approvedResponse } from '../domain/approvedKnowledge.js';
+import { DomainError } from '../domain/workflow.js';
 import { validateAssessment } from '../integrations/agent/validation.js';
 
 export class InvalidChatRequest extends Error {}
@@ -30,13 +32,16 @@ export class ChatService {
     const request = parseRequest(input);
     const queryId = randomUUID();
     const approved = this.repository.findApprovedKnowledge(questionKey(request.message));
+    if (approved) {
+      const response = approvedResponse(queryId, approved);
+      const query = this.repository.record(request.message, response, false, request.clientSessionId);
+      return { ...response, queryId: query.id };
+    }
     let raw: unknown;
     try {
-      raw = await this.provider.assessQuestion({ question: request.message, approvedKnowledge: approved ? [{
-        normalizedQuestionKey: approved.normalizedQuestionKey, content: approved.content,
-        reference: { sourceId: 'nexa-approved', title: approved.title, articleId: approved.articleId, articleRevision: approved.revision },
-      }] : [] });
-    } catch {
+      raw = await this.provider.assessQuestion({ question: request.message });
+    } catch (error) {
+      if (error instanceof DomainError && error.code === 'INVALID_PROVIDER_RESPONSE') throw error;
       raw = {
         status: 'FAILURE', organizationallyRelevant: null,
         retrievalCompleted: false, answer: null, evidence: [],

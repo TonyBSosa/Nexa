@@ -4,17 +4,18 @@ Deliver a simple MVP with clear domain boundaries, separate frontend/backend wor
 
 # System Context
 
-Employee/admin modes use the NEXA Web Portal. Only the NEXA Backend exposes business operations: its services use persistence, an agent gateway, and source adapters. Botpress Cloud initially supplies agent orchestration and may retrieve the configured synthetic document source. Persistence and adapters are service dependencies, not a mandatory sequential pipeline.
+Employees, TI, Knowledge Managers, and Management use the NEXA React application. Employee questions and administrative operations both enter through the NEXA Backend, whose services own persistence, domain decisions, the agent gateway, and source adapters. Botpress Cloud supplies replaceable semantic retrieval over configured synthetic knowledge through AgentProvider. The optional public Webchat embed is a disabled-by-default development diagnostic and is not a product request path.
 
 ```mermaid
 flowchart LR
-  U[Employee / Administrator] --> W[NEXA Web Portal]
+  E[Employee] --> W[NEXA React UI]
+  A[TI / Knowledge Manager / Management] --> W
   W -->|HTTP/REST| B[NEXA Backend controllers]
   B --> D[Domain / application services]
   D --> R[Repositories]
   R --> DB[(SQLite)]
-  D --> A[Agent gateway]
-  A --> BP[Botpress Cloud]
+  D --> G[Agent gateway]
+  G --> BP[Botpress Cloud]
   BP --> K[Synthetic document knowledge]
   D --> S[Knowledge source adapters]
   S --> P[NEXA Approved Knowledge]
@@ -58,7 +59,7 @@ This tree specifies intended responsibilities, not authorization to create these
 
 React + strict TypeScript + Vite, with Tailwind CSS + shadcn/ui. Screens: `/dashboard`, `/assistant`, `/sources`, `/analytics`, `/knowledge-health`, `/knowledge-operations`.
 
-Components handle presentation and user input. Backend services own classification persistence, deduplication, transitions, approval rules, and metrics. The frontend communicates only with NEXA's API and can initially use explicitly labeled mocks matching its contracts. Employee/admin navigation is not authentication or access control.
+Components handle presentation and user input. Backend services own relevance handling, assessment outcomes, classification persistence, deduplication, transitions, approval rules, and metrics. Every product screen, including the employee Assistant, communicates only with NEXA's API and can initially use explicitly labeled mocks matching its contracts. A disabled-by-default development flag may load the public Botpress Webchat proof for connectivity diagnostics; it receives no credential, is excluded from production builds, and has no domain integration.
 
 # Backend Architecture
 
@@ -102,13 +103,15 @@ An `AgentProvider` / `AgentGateway` exposes two conceptual operations:
 
 Prefer one structured assessment call over separate calls for classification and suggestions. Botpress-specific payloads stay inside the Botpress adapter. FAILURE never creates a gap. A non-relevant result cannot authorize gap creation regardless of sufficiency status. Exact shared conceptual result fields are in `API_CONTRACTS.md`.
 
-Validate external responses before use. Suggestions are tentative and source-supported; unknown experts remain unknown. Backend owns eligibility, matching, counts, persistence, transitions, freshness, approvals, publication, and metrics. If no usable recovery action is returned, provide a deterministic REQUEST_INFORMATION proposal for human approval. Backend development uses FakeAgentProvider while the real Botpress adapter is built; neither adapter can write domain state or authorize publication.
+Validate external responses before use. Suggestions are tentative and source-supported; unknown experts remain unknown. Backend owns eligibility, matching, counts, persistence, transitions, freshness, approvals, publication, and metrics. If no usable recovery action is returned, provide a deterministic REQUEST_INFORMATION proposal for human approval. FakeAgentProvider remains the deterministic default. BotpressAgentProvider uses the Botpress Runtime API when explicitly configured; neither adapter can write domain state or authorize publication.
 
 # Knowledge Sources
 
 At least one synthetic document/PDF source must actually work, through Botpress or another explicitly implemented adapter. Notion, SharePoint, Google Drive, Microsoft 365, and ERP/internal APIs are future, replaceable integrations.
 
-MVP publication writes to the backend-owned NEXA Approved Knowledge store in SQLite. The query service reads approved articles immediately and supplies relevant content and article/revision references to assessQuestion(), alongside configured external/agent knowledge. Start with deterministic canonical-question/alias lookup for recovered demo topics and simple text matching where needed; do not build a vector system. Only exact canonical-question/alias matches enter approved context; unrelated evidence is not treated as sufficient. For this deterministic MVP lookup, an approved match is authoritative. After assessment, an immediate SQLite transaction rechecks approved knowledge before persisting the query or creating/incrementing a gap. This final check wins over an in-flight insufficient result, including after publication/resolution, without holding a transaction across provider work. The provider-neutral AssessQuestionInput carries approved content and article references; FakeAgentProvider consumes it without Botpress.
+MVP publication writes to the backend-owned NEXA Approved Knowledge store in SQLite. The query service reads approved articles immediately and answers exact canonical-question/alias matches before calling an external provider. After any provider assessment, an immediate SQLite transaction rechecks approved knowledge before persisting the query or creating/incrementing a gap. This final check wins over an in-flight insufficient result, including after publication/resolution, without holding a transaction across provider work. The provider-neutral AssessQuestionInput retains optional approved context for replaceable providers, but the current query path short-circuits authoritative local matches.
+
+The Botpress adapter uses the official TypeScript client and Runtime API rather than the legacy Chat integration. A bot-context client discovers an active integration/channel and its installed integration ID; an integration-context client then creates an isolated user and conversation, submits an incoming text message, and polls outgoing text until a valid assessment envelope arrives or the bounded timeout expires. No participant call is required for this documented message flow. `x-integration-alias` is not used: `integrationId` establishes the required Runtime integration context. BotpressAgentProvider sends `NEXA_ASSESSMENT_V1`, a blank line, and the original question; it accepts only a validated `nexa.assessment.v1` JSON envelope. All Botpress types and safe authentication/authorization/timeout classifications stay inside the adapter. Draft generation remains deterministic in this iteration.
 
 PUBLISHED requires a committed approved article revision accessible to this query path. No Botpress indexing, Notion, SharePoint, or external publication is involved. External publication remains a future replaceable adapter. Sources is read-only in the initial MVP and includes the local approved store with honest availability metadata.
 

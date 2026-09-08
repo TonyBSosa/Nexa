@@ -361,7 +361,7 @@ test('published knowledge wins over a delayed insufficient provider result befor
   });
 });
 
-test('drafts are excluded, approved context reaches provider, and unresolved gaps do not override publication', async (t) => {
+test('drafts are excluded and approved local knowledge wins before the provider', async (t) => {
   const { repository, operations, provider, chat, gapId, draft } = await draftFixture(t);
   for (const underReview of [false, true]) {
     if (underReview) submit(operations, gapId);
@@ -372,18 +372,13 @@ test('drafts are excluded, approved context reaches provider, and unresolved gap
   }
   operations.approval(gapId, { decision: 'APPROVED', draftRevision: draft.revision });
   const occurrences = repository.getGap(gapId)!.occurrences;
-  let received = false;
+  let calls = 0;
   const boundary = new ChatService({
-    assessQuestion: async (input) => {
-      assert.equal(input.approvedKnowledge?.[0]?.content, draft.content);
-      assert.equal(input.approvedKnowledge?.[0]?.reference.sourceId, 'nexa-approved');
-      received = true;
-      // Simulate a provider ignoring the new context; the local canonical decision still wins.
-      return provider.assessQuestion({ question: input.question });
-    }, generateKnowledgeDraft: provider.generateKnowledgeDraft.bind(provider),
+    assessQuestion: async () => { calls++; throw new Error('Provider must not be called'); },
+    generateKnowledgeDraft: provider.generateKnowledgeDraft.bind(provider),
   }, repository);
   const result = await boundary.chat({ message: 'What is the company procedure for decommissioning a printer?' });
-  assert.ok(received);
+  assert.equal(calls, 0);
   assert.equal(result.status, 'SUFFICIENT');
   assert.equal(repository.getGap(gapId)!.occurrences, occurrences);
   assert.equal(repository.listGaps().length, 1);

@@ -4,7 +4,7 @@ NEXA is an organizational knowledge intelligence concept that turns questions an
 
 ## Current Stage
 
-Knowledge Recovery Loop: SQLite-backed gaps now progress through triage, simulated recovery, evidence collection, versioned drafting, human review, local publication, and explicit resolution. Published articles immediately answer matching chat questions through NEXA Approved Knowledge. FakeAgentProvider remains active; Botpress, real external actions, authentication, analytics dashboards, final UI, Tailwind/shadcn, and Docker remain pending.
+Knowledge Recovery Loop: SQLite-backed gaps now progress through triage, simulated recovery, evidence collection, versioned drafting, human review, local publication, and explicit resolution. Published articles immediately answer matching chat questions through NEXA Approved Knowledge. Employee questions use the NEXA React assistant and Express backend, which selects FakeAgentProvider by default or BotpressAgentProvider when configured. Real external actions, authentication, Tailwind/shadcn, and Docker remain pending.
 
 ## Prerequisites
 
@@ -53,13 +53,21 @@ npm run dev:web
 - Web: http://127.0.0.1:5173
 - API health: http://127.0.0.1:3000/api/health
 
-Click **Check API health** in the development page. Expected result: `nexa-api: ok`. The browser calls `/api/health` on Vite, which proxies to the configured backend URL. No direct Botpress calls or CORS package are needed. The health button is omitted from production builds.
+Click **Check API health** in the development page. Expected result: `nexa-api: ok`. The browser client calls `/api/health` on Vite, which proxies to the configured backend URL. No CORS package is needed. The health button is omitted from production builds.
 
-Defaults work without environment files. `.env.example` lists optional **shell** variables; no populated .env file is supplied or required, and these scripts do not load one. For a different API port in PowerShell, set `$env:PORT = '3001'` in the API terminal and `$env:API_URL = 'http://127.0.0.1:3001'` in the web terminal before starting. Restart after changing configuration. Never put secrets in browser-exposed configuration or Git.
+Defaults work without environment files. `.env.example` lists **shell** variables; no populated .env file is supplied or loaded. For a different API port in PowerShell, set `$env:PORT = '3001'` in the API terminal and `$env:API_URL = 'http://127.0.0.1:3001'` in the web terminal before starting. Restart after changing configuration. Never put secrets in browser-exposed configuration or Git.
+
+The floating Botpress Webchat is retained only as a development connectivity diagnostic. It is disabled by default and cannot be included in production builds. To reproduce the proof, set `VITE_ENABLE_BOTPRESS_WEBCHAT=true` for the web development process; the two optional URL overrides in `.env.example` are public browser configuration only. The diagnostic logs concise `[NEXA Webchat]` event summaries and does not participate in the product request path, persist events, or create Knowledge Gaps.
+
+Set `AGENT_PROVIDER=fake` for the deterministic provider. To use a deployed Botpress bot, set `AGENT_PROVIDER=botpress`, `BOTPRESS_TOKEN`, and `BOTPRESS_BOT_ID` in the API process environment. `BOTPRESS_INTEGRATION_NAME` is an optional context selector; without it, the adapter uses the most recently active conversation context. Missing required Botpress settings or an unknown provider value stops startup with a configuration error.
+
+The Botpress adapter uses the official TypeScript client. A bot-context client discovers a proven integration/channel and resolves that installed integration's ID from bot configuration. A second client scoped with `integrationId` creates an isolated user and conversation, sends the incoming text message, and collects outgoing text until it receives a valid assessment envelope or reaches a bounded timeout. `x-integration-alias` is not required. The old bot-context creation attempt caused the 403; Runtime creation must run in integration context. BotpressAgentProvider prefixes assessment questions with `NEXA_ASSESSMENT_V1`, then parses and validates only the returned `nexa.assessment.v1` JSON. Conversational prose never determines relevance or status. Draft generation remains deterministic to preserve Knowledge Operations.
+
+Run the opt-in live provider smoke outside normal tests and CI with `npm run smoke:botpress -w @nexa/api`. It requires `AGENT_PROVIDER=botpress`, `BOTPRESS_TOKEN`, and `BOTPRESS_BOT_ID`; it validates the structured status, relevance, and expected toner answer for all four Spanish questions.
 
 ## Deterministic Chat Development
 
-`POST /api/chat` accepts `{"message":"...","clientSessionId":"optional-uuid"}`. Use the question form and Send button at the local web URL. Each valid submission receives a persisted Query UUID, including non-organizational questions and controlled provider failures. Only relevant INSUFFICIENT assessments with completed retrieval create/reuse a gap and return `knowledgeGapId`. Canonical approved knowledge is supplied to the provider as neutral context and rechecked inside the final query-write transaction. It returns grounded `nexa-approved` evidence even when a delayed provider assessment says INSUFFICIENT.
+`POST /api/chat` accepts `{"message":"...","clientSessionId":"optional-uuid"}`. Use the question form and Send button at the local web URL. Each valid submission receives a persisted Query UUID, including non-organizational questions and controlled provider failures. Only relevant INSUFFICIENT assessments with completed retrieval create/reuse a gap and return `knowledgeGapId`. Canonical approved knowledge is checked before any external provider call and rechecked inside the final query-write transaction. It returns grounded `nexa-approved` evidence even when Botpress is unavailable or an in-flight assessment becomes stale during publication.
 
 | Example | Result |
 | --- | --- |
@@ -97,7 +105,7 @@ The development page includes a plain Knowledge Operations harness. Ask “¿Cu�
 4. Approve the current fresh revision. Approval, local article publication, and `PUBLISHED` commit atomically. Changes requested or rejection return the gap to `KNOWLEDGE_COLLECTED` and require a newer draft.
 5. Ask the same question again to receive a `SUFFICIENT` response from NEXA Approved Knowledge, then explicitly close the gap (`PUBLISHED → RESOLVED`).
 
-Mutation routes are `PATCH /api/knowledge-gaps/:id/triage` and `POST` to `/:id/transition`, `/:id/evidence`, `/:id/draft`, and `/:id/approval`. Evidence revisions make older drafts stale; only the latest draft using the current evidence revision can be submitted and approved. Successful APPROVED retries reuse the same publication, including after resolution; conflicting reviews return 409. Malformed provider responses return sanitized 502 INVALID_PROVIDER_RESPONSE. Recovery actions and human decisions are persisted locally. Botpress and real Microsoft 365 or document-system integrations are not active.
+Mutation routes are `PATCH /api/knowledge-gaps/:id/triage` and `POST` to `/:id/transition`, `/:id/evidence`, `/:id/draft`, and `/:id/approval`. Evidence revisions make older drafts stale; only the latest draft using the current evidence revision can be submitted and approved. Successful APPROVED retries reuse the same publication, including after resolution; conflicting reviews return 409. Malformed provider responses return sanitized 502 INVALID_PROVIDER_RESPONSE. Recovery actions and human decisions are persisted locally. Real Microsoft 365 or document-system integrations are not active.
 
 To reset local demo data, stop the API, remove only the configured SQLite database file and its matching `-journal`, `-wal`, and `-shm` sidecars if present, then restart. With defaults these are under the root `data/` directory. This deletes local demo queries/gaps; verify the configured path before deleting. Tests use in-memory or isolated temporary databases and never access the development database.
 
