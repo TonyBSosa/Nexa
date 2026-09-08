@@ -42,7 +42,7 @@ These records capture planned MVP decisions, consistent with `AGENTS.md`, `PROJE
 
 **Decision:** Use Botpress Cloud initially behind a provider-neutral backend agent gateway.
 **Rationale:** Orchestration choice must not define the product or lock its domain model to one provider.
-**Consequences:** No frontend dependency on Botpress or provider payloads in shared contracts.
+**Consequences:** No Botpress provider payloads enter shared domain contracts. All frontend product workflows, including the employee assistant, depend on the NEXA backend. A public Webchat embed may be used only as a disabled-by-default development diagnostic.
 
 ## ADR-008 — REST API between frontend and backend
 
@@ -136,6 +136,18 @@ These records capture planned MVP decisions, consistent with `AGENTS.md`, `PROJE
 
 ## ADR-023 — Knowledge Operations remediation
 
-**Decision:** Keep metadata/evidence/draft writes separate from explicit human transitions. Canonical approved content is authoritative: pass it through AssessQuestionInput and recheck it inside the immediate query-write transaction after provider work. Approval retries require APPROVED, the current revision, and a consistent publication; conflicting reviews fail.
+**Decision:** Keep metadata/evidence/draft writes separate from explicit human transitions. Canonical approved content is authoritative: answer an existing match before external provider work and recheck it inside the immediate query-write transaction after provider work. Approval retries require APPROVED, the current revision, and a consistent publication; conflicting reviews fail.
 **Rationale:** Preserve the documented lifecycle and prevent delayed insufficient assessments from recreating demand after publication.
-**Consequences:** No provider call runs inside a SQLite transaction. Runtime validation rejects malformed provider shapes; unusable action entries are filtered and replaced with the labeled fallback when necessary. Existing message/evidence naming, HTTP 200 chat assessments, session demand suppression, and observability logging remain unchanged. The local store and FakeAgentProvider remain sufficient; no new integration or infrastructure is added.
+**Consequences:** No provider call runs inside a SQLite transaction. Runtime validation rejects malformed provider shapes; unusable action entries are filtered and replaced with the labeled fallback when necessary. Existing message/evidence naming, HTTP 200 chat assessments, session demand suppression, and observability logging remain unchanged. The local store and FakeAgentProvider remain sufficient without an external provider.
+
+## ADR-024 — Botpress Runtime API provider
+
+**Decision:** Add BotpressAgentProvider behind AgentProvider, selected with `AGENT_PROVIDER=botpress`; keep FakeAgentProvider as the default. Use the official Botpress TypeScript client and Runtime API, discover an installed integration and proven channel, create an isolated integration-scoped user/conversation for each assessment, and exchange a narrow `nexa.assessment.v1` JSON envelope.
+**Rationale:** The deployed NEXA bot and its indexed synthetic knowledge were verified through the public Webchat proof; the backend needs an independent, narrow adapter so that real semantic retrieval does not couple shared contracts or domain state to Botpress.
+**Consequences:** Botpress credentials remain server environment values. Bot context uses the token and bot ID for discovery; the resolved installed `integrationId` establishes integration context for Runtime writes. `x-integration-alias` is not required. Calls distinguish authentication, authorization, timeout, unavailability, and invalid provider responses internally while public failures remain sanitized. Each assessment sends the `NEXA_ASSESSMENT_V1` prefix and accepts only validated `nexa.assessment.v1` JSON, never conversational inference. Botpress cannot write queries, gaps, workflow state, approvals, or publications. Draft generation remains deterministic until a separate Botpress draft flow is justified.
+
+## ADR-025 — Webchat connectivity diagnostic
+
+**Decision:** Retain the floating Botpress Webchat only as an optional development connectivity and RAG diagnostic. It is disabled by default, guarded by `VITE_ENABLE_BOTPRESS_WEBCHAT=true`, and excluded from production builds. The product request path remains React → Express → AgentProvider → Botpress.
+**Rationale:** The proof verified the deployed agent, MX550 retrieval, and Webchat v5 message fields including `authorId` and `block`, without making a browser-owned integration part of NEXA's architecture.
+**Consequences:** Do not ingest Webchat events or create a second domain path. The diagnostic uses public embed resources and no credentials. Express continues to own relevance, assessment outcomes, query/gap persistence, approved-knowledge priority, workflow, and analytics. BotpressAgentProvider remains the production path; its Runtime transport now works through explicit integration-ID context, independently of the diagnostic embed.

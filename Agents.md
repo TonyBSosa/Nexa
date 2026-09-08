@@ -31,7 +31,7 @@ Keep workflow rules in the backend. Publication requires human validation and ap
 - Backend: Node.js, Express, and TypeScript; HTTP/REST communication with the frontend.
 - MVP persistence: SQLite. Initial agent/LLM orchestration: Botpress Cloud.
 - Backend owns business logic, analytics, persistence, knowledge-gap workflows, and integration boundaries. Keep business rules outside UI components.
-- Frontend must never depend directly on Botpress. Isolate Botpress behind a replaceable backend integration boundary.
+- Frontend product workflows, including the employee assistant, must use the NEXA backend. A public Botpress Webchat embed may exist only as an explicitly enabled development diagnostic; it must be disabled by default, receive no backend credentials, and never write NEXA domain state.
 - Treat Notion, SharePoint, Google Drive, Microsoft 365, ERP systems, and company APIs as replaceable integrations.
 - Use shared types for entities exchanged between frontend and backend.
 
