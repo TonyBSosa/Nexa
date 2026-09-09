@@ -7,7 +7,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.test.json",
-    "test": "node --import tsx --test test/agent.test.ts test/botpress.test.ts test/knowledge.test.ts test/operations.test.ts",
+    "test": "node --import tsx --test test/agent.test.ts test/botpress.test.ts test/knowledge.test.ts test/operations.test.ts test/analytics.test.ts",
     "smoke:botpress": "node --env-file-if-exists=../../.env --import tsx src/integrations/agent/botpress/smoke.ts",
     "start": "node dist/server.js"
   },
