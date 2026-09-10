@@ -1,6 +1,6 @@
 # Provisional API Contracts
 
-Chat, queries, Knowledge Operations, health, and local approved-article routes are implemented. Dashboard, Analytics, Knowledge Health, and Sources remain planned. Employee assistant requests use the React frontend and these backend contracts; the optional development Webchat diagnostic is outside the product flow and adds no endpoint. These contracts support independent frontend/backend work and matching, explicitly labeled frontend mocks. Shared types eventually belong in `packages/shared/`. No authentication endpoints or verified-user claims are included.
+Chat, queries, Knowledge Operations, health, and local approved-article routes are implemented. Dashboard and Analytics aggregation routes are implemented. Knowledge Health and Sources remain planned. Employee assistant requests use the React frontend and these backend contracts; the optional development Webchat diagnostic is outside the product flow and adds no endpoint. These contracts support independent frontend/backend work and matching, explicitly labeled frontend mocks. Shared types eventually belong in `packages/shared/`. No authentication endpoints or verified-user claims are included.
 
 ## Conventions and Shared DTOs
 
@@ -248,3 +248,11 @@ Purpose: KnowledgeHealthSummary, with observed-data indicators. No body.
 ```
 
 Use `/api/knowledge-gaps` for underlying gap details. Errors: PERSISTENCE_ERROR. Empty-data rates are null and displayed as “No data,” not a fabricated healthy score.
+
+## Dashboard and Analytics aggregation (implemented MVP)
+
+GET /api/dashboard and GET /api/analytics return the same additive AnalyticsSummary payload from shared backend aggregation of existing SQLite repository reads. There are no provider calls or domain writes. Existing totalQueries remains accepted organizational outcomes (answered + insufficient); organizationalQueries is its explicit alias. totalAttempts includes every persisted query, including FAILURE and unrelated inputs. No time filter is applied.
+
+Additional fields: openGaps (all except RESOLVED, including PUBLISHED), resolvedGaps, inRecoveryGaps (IN_PROGRESS + KNOWLEDGE_COLLECTED + AWAITING_APPROVAL), publishedKnowledge (approved article count), totalGapOccurrences (sum of stored occurrences across all gaps), queryAnswerRate, gapResolutionRate, frequentOpenGaps (up to five open gaps with occurrences > 1, descending occurrences then id), and recentActivity (up to five most recent accepted organizational queries). Dashboard also receives categories and sourceUsage. Rates are null for empty denominators; counts are zero and lists empty. Source usage deduplicates each source within a query. Session suppression affects stored demand, not query outcome counts. Publication/resolution never reclassifies historical queries.
+
+The UI shows loading, retryable errors and honest empty states; it never substitutes demo values on these two screens. Health and Sources remain outside this change. Resolution duration is omitted because the schema has no dedicated resolvedAt timestamp. Aggregation loads existing repository lists in memory for the local MVP; pagination and large-dataset optimization are deferred. Both routes return sanitized 500 PERSISTENCE_ERROR on storage failures.

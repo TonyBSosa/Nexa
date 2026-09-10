@@ -17,3 +17,5 @@ export type {
   OrganizationalRelevance, EvidenceReference, SuggestedActionType,
   SuggestedAction, SuggestedExpert, ApiErrorResponse,
 } from './chat.js';
+
+export type { DashboardSummary, AnalyticsSummary } from './analytics.js';
