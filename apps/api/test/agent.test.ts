@@ -120,6 +120,7 @@ test('HTTP contract: health, structured outcomes, validation, malformed JSON, an
       assert.equal(body.organizationallyRelevant, false);
       assert.equal(body.sufficientKnowledge, false);
       assert.equal(typeof body.answer, 'string');
+      assert.equal(body.answer.includes('demostración determinista'), false);
     }
   }
   for (const body of ['{"message":" "}', '{broken', '{}', '{"message":42}']) {

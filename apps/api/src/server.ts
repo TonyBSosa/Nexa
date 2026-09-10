@@ -9,6 +9,7 @@ const app = createApp(createAgentProvider(config), new SQLiteKnowledgeRepository
 
 const server = app.listen(config.port, config.host, () => {
   console.log(`NEXA API: http://${config.host}:${config.port}`);
+  console.log(`Agent provider: ${config.agentProvider}`);
 });
 
 server.on('error', (error) => {

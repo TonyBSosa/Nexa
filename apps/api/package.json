@@ -4,12 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "node --env-file-if-exists=.env --import tsx --watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.test.json",
-    "test": "node --import tsx --test test/agent.test.ts test/botpress.test.ts test/knowledge.test.ts test/operations.test.ts test/analytics.test.ts",
-    "smoke:botpress": "node --env-file-if-exists=../../.env --import tsx src/integrations/agent/botpress/smoke.ts",
-    "start": "node dist/server.js"
+    "test": "node --import tsx --test test/agent.test.ts test/botpress.test.ts test/knowledge.test.ts test/operations.test.ts",
+    "smoke:botpress": "node --env-file-if-exists=.env --import tsx src/integrations/agent/botpress/smoke.ts",
+    "start": "node --env-file-if-exists=.env dist/server.js"
   },
   "dependencies": {
     "@botpress/client": "^2.4.0",

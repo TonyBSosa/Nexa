@@ -1,9 +1,9 @@
 import type { AssessQuestionInput, DraftGenerationInput, DraftGenerationResult, QuestionAssessment } from '@nexa/shared';
 import { DomainError } from '../../domain/workflow.js';
 import type { AgentProvider } from './AgentProvider.js';
-import { FakeAgentProvider } from './FakeAgentProvider.js';
 import { BotpressRuntimeError } from './botpress/BotpressRuntimeClient.js';
-import type { BotpressRuntimeClient } from './botpress/BotpressRuntimeClient.js';
+import type { BotpressRuntimeClient, BotpressRuntimeErrorKind } from './botpress/BotpressRuntimeClient.js';
+import { generateDeterministicDraft } from './deterministicDraft.js';
 import { validateAssessment } from './validation.js';
 
 const protocol = 'nexa.assessment.v1';
@@ -58,22 +58,51 @@ function normalizeEnvelope(value: unknown): unknown {
   };
 }
 
+function jsonCandidates(text: string): string[] {
+  const trimmed = text.trim();
+  const candidates = new Set([trimmed]);
+  for (const match of trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)) {
+    if (match[1]?.trim()) candidates.add(match[1].trim());
+  }
+  const firstBrace = trimmed.indexOf('{');
+  const lastBrace = trimmed.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) candidates.add(trimmed.slice(firstBrace, lastBrace + 1));
+  return [...candidates];
+}
+
 function parseEnvelope(texts: string[]): QuestionAssessment {
   for (const text of texts) {
-    const trimmed = text.trim();
-    const candidate = trimmed.startsWith('```json') && trimmed.endsWith('```')
-      ? trimmed.slice(7, -3).trim()
-      : trimmed;
-    try {
-      const parsed: unknown = JSON.parse(candidate);
-      const assessment = normalizeEnvelope(parsed);
-      if (assessment === undefined) continue;
-      return validateAssessment(assessment);
-    } catch (error) {
-      if (error instanceof DomainError) throw error;
+    for (const candidate of jsonCandidates(text)) {
+      try {
+        const parsed: unknown = JSON.parse(candidate);
+        const assessment = normalizeEnvelope(parsed);
+        if (assessment === undefined) continue;
+        return validateAssessment(assessment);
+      } catch { /* Continue until a valid structured assessment arrives. */ }
     }
   }
   throw new DomainError('INVALID_PROVIDER_RESPONSE', 'El agente devolvió una respuesta no válida.');
+}
+
+type AttemptFailure = BotpressRuntimeErrorKind | 'PROVIDER_FAILURE' | 'UNAVAILABLE';
+type AttemptResult = { assessment: QuestionAssessment } | { failure: AttemptFailure };
+
+const failureAssessment: QuestionAssessment = {
+  status: 'FAILURE', organizationallyRelevant: null,
+  retrievalCompleted: false, answer: null, evidence: [],
+};
+
+interface SafeLogger {
+  info(message: string): void;
+  warn(message: string): void;
+}
+
+function failureLabel(reason: AttemptFailure): string {
+  if (reason === 'TIMEOUT') return 'provider timeout';
+  if (reason === 'INVALID_PROVIDER_RESPONSE') return 'invalid structured response';
+  if (reason === 'AUTHENTICATION_ERROR') return 'provider authentication error';
+  if (reason === 'AUTHORIZATION_ERROR') return 'provider authorization error';
+  return 'provider unavailable';
 }
 
 function hasValidEnvelope(texts: string[]): boolean {
@@ -86,28 +115,60 @@ function hasValidEnvelope(texts: string[]): boolean {
 }
 
 export class BotpressAgentProvider implements AgentProvider {
-  private readonly deterministicDraftProvider = new FakeAgentProvider();
-
-  constructor(private readonly runtime: Pick<BotpressRuntimeClient, 'ask'>) {}
+  constructor(
+    private readonly runtime: Pick<BotpressRuntimeClient, 'ask'>,
+    private readonly logger?: SafeLogger,
+  ) {}
 
   async assessQuestion(input: AssessQuestionInput): Promise<QuestionAssessment> {
+    const first = await this.attempt(input.question);
+    if ('failure' in first) {
+      this.logger?.warn(`Botpress assessment: ${failureLabel(first.failure)}; retrying once.`);
+      const retry = await this.attempt(input.question);
+      if ('failure' in retry) {
+        this.logger?.warn(`Botpress assessment: ${failureLabel(retry.failure)} after retry.`);
+        return failureAssessment;
+      }
+      if (retry.assessment.status === 'INSUFFICIENT' && retry.assessment.organizationallyRelevant) {
+        this.logger?.warn('Botpress assessment: insufficiency was not confirmed after an initial provider failure.');
+        return failureAssessment;
+      }
+      this.logger?.info('Botpress assessment: provider response recovered on retry.');
+      return retry.assessment;
+    }
+    const assessment = first.assessment;
+    if (assessment.status === 'SUFFICIENT' || !assessment.organizationallyRelevant) return assessment;
+
+    this.logger?.info('Botpress assessment: confirming organizational insufficiency once.');
+    const confirmation = await this.attempt(input.question);
+    if ('failure' in confirmation) {
+      this.logger?.warn(`Botpress assessment: ${failureLabel(confirmation.failure)} during insufficiency confirmation.`);
+      return failureAssessment;
+    }
+    if (confirmation.assessment.status === 'SUFFICIENT') {
+      this.logger?.info('Botpress assessment: retrieval recovered on confirmation.');
+      return confirmation.assessment;
+    }
+    if (confirmation.assessment.organizationallyRelevant) {
+      this.logger?.info('Botpress assessment: confirmed insufficiency.');
+    }
+    return confirmation.assessment;
+  }
+
+  private async attempt(question: string): Promise<AttemptResult> {
     try {
-      return parseEnvelope(await this.runtime.ask(prompt(input.question), hasValidEnvelope));
+      const assessment = parseEnvelope(await this.runtime.ask(prompt(question), hasValidEnvelope));
+      return assessment.status === 'FAILURE' ? { failure: 'PROVIDER_FAILURE' } : { assessment };
     } catch (error) {
-      if (error instanceof BotpressRuntimeError && error.kind !== 'INVALID_PROVIDER_RESPONSE') {
-        return {
-          status: 'FAILURE', organizationallyRelevant: null,
-          retrievalCompleted: false, answer: null, evidence: [],
-        };
+      if (error instanceof BotpressRuntimeError) return { failure: error.kind };
+      if (error instanceof DomainError && error.code === 'INVALID_PROVIDER_RESPONSE') {
+        return { failure: 'INVALID_PROVIDER_RESPONSE' };
       }
-      if (error instanceof BotpressRuntimeError) {
-        throw new DomainError('INVALID_PROVIDER_RESPONSE', 'El agente devolvió una respuesta no válida.');
-      }
-      throw error;
+      return { failure: 'UNAVAILABLE' };
     }
   }
 
   generateKnowledgeDraft(input: DraftGenerationInput): Promise<DraftGenerationResult> {
-    return this.deterministicDraftProvider.generateKnowledgeDraft(input);
+    return generateDeterministicDraft(input);
   }
 }
