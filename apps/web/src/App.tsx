@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { KnowledgeGap, Query } from '@nexa/shared';
+import type { AnalyticsSummary, KnowledgeGap } from '@nexa/shared';
 import {
-  Activity, AlertCircle, BarChart3, Bell, Check, CheckCircle2, ChevronRight,
+  Activity, AlertCircle, BarChart3, Bell, CheckCircle2, ChevronRight,
   Database, FileCheck2, LayoutDashboard, Menu, MessageCircle, Search,
   Settings2, Sparkles, Workflow, X,
 } from 'lucide-react';
@@ -54,41 +54,43 @@ function gapTone(status: KnowledgeGap['status']) {
   return 'blue';
 }
 
-function Dashboard({ goTo }: { goTo: (page: PageKey) => void }) {
-  const [queries, setQueries] = useState<Query[]>([]);
-  const [gaps, setGaps] = useState<KnowledgeGap[]>([]);
-  const [live, setLive] = useState(false);
-
+function useMetrics(endpoint: string) {
+  const [data, setData] = useState<AnalyticsSummary | null>(null);
+  const [error, setError] = useState(false);
+  const [version, setVersion] = useState(0);
   useEffect(() => {
-    let active = true;
-    Promise.all([fetch('/api/queries'), fetch('/api/knowledge-gaps')]).then(async ([queryResponse, gapResponse]) => {
-      if (!queryResponse.ok || !gapResponse.ok) throw new Error('Datos no disponibles');
-      const queryBody = await queryResponse.json() as { items: Query[] };
-      const gapBody = await gapResponse.json() as { items: KnowledgeGap[] };
-      if (active) { setQueries(queryBody.items); setGaps(gapBody.items); setLive(true); }
-    }).catch(() => { if (active) setLive(false); });
-    return () => { active = false; };
-  }, []);
+    const controller = new AbortController();
+    fetch(endpoint, { signal: controller.signal }).then(async response => {
+      if (!response.ok) throw new Error('Datos no disponibles');
+      const body = await response.json() as AnalyticsSummary;
+      if (!controller.signal.aborted) setData(body);
+    }).catch(() => { if (!controller.signal.aborted) setError(true); });
+    return () => controller.abort();
+  }, [endpoint, version]);
+  return { data, error, retry: () => { setError(false); setData(null); setVersion(value => value + 1); } };
+}
 
-  const answered = queries.filter(query => query.sufficientKnowledge).length;
-  const open = gaps.filter(gap => gap.status !== 'RESOLVED').length;
-  const resolved = gaps.filter(gap => gap.status === 'RESOLVED').length;
-  const coverage = queries.length ? `${Math.round(answered / queries.length * 100)}%` : 'Sin datos';
-  const recent = queries.length ? queries.slice(0, 4) : [
-    { id: 'demo-1', message: 'Se publicó un procedimiento de inventario.', sufficientKnowledge: true, createdAt: '' },
-    { id: 'demo-2', message: 'Se detectó una pregunta sobre baja de equipos.', sufficientKnowledge: false, createdAt: '' },
-  ];
+function MetricsState({ error, retry }: { error: boolean; retry: () => void }) {
+  return <Panel><p className="panel-intro" role={error ? 'alert' : 'status'}>{error ? 'No se pudieron cargar las métricas.' : 'Cargando métricas…'}</p>{error && <button className="text-button" onClick={retry}>Reintentar</button>}</Panel>;
+}
 
-  return <><PageHeader page="dashboard" demo={!live} /><div className="metric-grid">
-    <Metric icon={MessageCircle} value={live ? String(queries.length) : '1.284'} label="Consultas totales" detail={live ? 'Datos del API' : 'Demo'} color="#3461db" />
-    <Metric icon={CheckCircle2} value={live ? coverage : '78,4%'} label="Cobertura observada" detail={live ? `${answered} respondidas` : '+4,2%'} color="#2d8b72" />
-    <Metric icon={AlertCircle} value={live ? String(open) : '24'} label="Brechas abiertas" detail={live ? 'Estado actual' : '6 prioritarias'} color="#d08a31" />
-    <Metric icon={Workflow} value={live ? String(gaps.filter(g => ['IN_PROGRESS', 'KNOWLEDGE_COLLECTED', 'AWAITING_APPROVAL'].includes(g.status)).length) : '11'} label="En recuperación" detail={live ? 'Flujo activo' : '3 nuevas'} color="#7958c9" />
-    <Metric icon={Activity} value={live ? String(resolved) : '38'} label="Brechas resueltas" detail={live ? 'Acumulado' : 'Este mes · demo'} color="#2d8b72" />
-  </div><div className="dashboard-grid">
-    <Panel title="Actividad reciente"><div className="activity-list">{recent.map(item => <div className="activity" key={item.id}><span className="activity-icon">{item.sufficientKnowledge ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}</span><div><strong>{item.sufficientKnowledge ? 'Consulta respondida' : 'Brecha detectada'}</strong><p>{item.message}</p></div><time>{item.createdAt ? new Date(item.createdAt).toLocaleDateString('es') : 'Demo'}</time></div>)}</div></Panel>
-    <Panel title="Flujo de conocimiento"><div className="flow"><div className="flow-line" />{['PREGUNTAR', 'DETECTAR', 'RECUPERAR', 'VALIDAR', 'PUBLICAR', 'APRENDER'].map((step, index) => <div className={`flow-step ${index < 4 ? 'done' : index === 4 ? 'current' : ''}`} key={step}><span>{index < 4 ? <Check size={13} /> : index + 1}</span><small>{step}</small></div>)}</div><p className="muted-copy">Cada pregunta puede convertirse en conocimiento aprobado y reutilizable.</p></Panel>
-  </div><Panel title="Brechas prioritarias"><div className="table-wrap"><table><thead><tr><th>Brecha</th><th>Estado</th><th>Ocurrencias</th><th>Prioridad</th><th>Departamento</th></tr></thead><tbody>{gaps.slice(0, 4).map(gap => <tr key={gap.id}><td className="primary-cell">{gap.title}</td><td><Badge tone={gapTone(gap.status)}>{statusLabels[gap.status]}</Badge></td><td>{gap.occurrences}</td><td>{gap.priority}</td><td>{gap.suggestedDepartment ?? 'Sin asignar'}</td></tr>)}{!gaps.length && <tr><td colSpan={5} className="empty-cell">No hay brechas registradas. Prueba una consulta no documentada en el Asistente IA.</td></tr>}</tbody></table></div><button className="text-button" onClick={() => goTo('operations')}>Abrir operaciones <ChevronRight size={14} /></button></Panel></>;
+function FrequentGaps({ gaps }: { gaps: KnowledgeGap[] }) {
+  return <div className="table-wrap"><table><thead><tr><th>Brecha</th><th>Estado</th><th>Ocurrencias</th><th>Prioridad</th><th>Departamento</th></tr></thead><tbody>{gaps.map(gap => <tr key={gap.id}><td className="primary-cell">{gap.title}</td><td><Badge tone={gapTone(gap.status)}>{statusLabels[gap.status]}</Badge></td><td>{gap.occurrences}</td><td>{gap.priority}</td><td>{gap.suggestedDepartment ?? 'Sin asignar'}</td></tr>)}{!gaps.length && <tr><td colSpan={5} className="empty-cell">No hay brechas abiertas con más de una ocurrencia.</td></tr>}</tbody></table></div>;
+}
+
+function Dashboard({ goTo }: { goTo: (page: PageKey) => void }) {
+  const { data, error, retry } = useMetrics('/api/dashboard');
+  if (!data) return <><PageHeader page="dashboard" /><MetricsState error={error} retry={retry} /></>;
+  return <><PageHeader page="dashboard" /><div className="metric-grid">
+    <Metric icon={MessageCircle} value={String(data.totalQueries)} label="Consultas organizacionales" detail={data.totalAttempts + ' intentos registrados'} color="#3461db" />
+    <Metric icon={CheckCircle2} value={data.queryAnswerRate === null ? 'Sin datos' : Math.round(data.queryAnswerRate * 100) + '%'} label="Respuestas suficientes" detail={data.answeredQueries + ' respondidas'} color="#2d8b72" />
+    <Metric icon={AlertCircle} value={String(data.openGaps)} label="Brechas abiertas" detail="Incluye publicadas sin cierre" color="#d08a31" />
+    <Metric icon={Workflow} value={String(data.inRecoveryGaps)} label="En recuperación" detail="Recopilación y revisión" color="#7958c9" />
+    <Metric icon={Activity} value={String(data.resolvedGaps)} label="Brechas resueltas" detail="Cierre explícito" color="#2d8b72" />
+  </div><p className="muted-copy">Datos acumulados en SQLite. Las consultas organizacionales excluyen fallos y preguntas fuera de alcance; los porcentajes describen consultas observadas.</p><div className="dashboard-grid">
+    <Panel title="Actividad organizacional reciente"><div className="activity-list">{data.recentActivity.map(item => <div className="activity" key={item.id}><span className="activity-icon">{item.sufficientKnowledge ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}</span><div><strong>{item.sufficientKnowledge ? 'Consulta respondida' : 'Conocimiento insuficiente'}</strong><p>{item.message}</p></div><time>{new Date(item.createdAt).toLocaleDateString('es')}</time></div>)}{!data.recentActivity.length && <p className="empty-cell">No hay consultas organizacionales registradas.</p>}</div></Panel>
+    <Panel title="Flujo de conocimiento"><div className="flow"><div className="flow-line" />{['PREGUNTAR', 'DETECTAR', 'RECUPERAR', 'VALIDAR', 'PUBLICAR', 'APRENDER'].map((step, index) => <div className="flow-step" key={step}><span>{index + 1}</span><small>{step}</small></div>)}</div><p className="muted-copy">Cada pregunta puede convertirse en conocimiento aprobado y reutilizable.</p></Panel>
+  </div><Panel title="Brechas abiertas frecuentes"><FrequentGaps gaps={data.frequentOpenGaps} /><button className="text-button" onClick={() => goTo('operations')}>Abrir operaciones <ChevronRight size={14} /></button></Panel></>;
 }
 
 function Sources() {
@@ -111,7 +113,21 @@ function Health() {
 }
 
 function Analytics() {
-  return <><PageHeader page="analytics" demo /><div className="metric-grid four"><Metric icon={MessageCircle} value="324" label="Consultas esta semana" detail="Demo" color="#3461db" /><Metric icon={CheckCircle2} value="247" label="Respondidas" detail="76,2%" color="#2d8b72" /><Metric icon={AlertCircle} value="61" label="Insuficientes" detail="18,8%" color="#d08a31" /><Metric icon={FileCheck2} value="12" label="Conocimiento recuperado" detail="Demo" color="#7958c9" /></div><div className="two-col"><Panel title="Consultas por día"><div className="chart-bars">{[['Lun',54],['Mar',72],['Mié',63],['Jue',88],['Vie',76],['Sáb',34],['Dom',28]].map(([day, value]) => <div className="chart-column" key={day}><span style={{ height: `${value}%` }} /><small>{day}</small></div>)}</div></Panel><Panel title="Principales categorías"><BarRows items={[['TI y soporte', 42], ['RRHH', 25], ['Finanzas', 18], ['Operaciones', 15]]} /></Panel></div><div className="impact-card"><Sparkles size={20} /><div><p className="eyebrow">Impacto del conocimiento recuperado</p><h2>12 consultas posteriores pudieron responderse con conocimiento recuperado y publicado.</h2><p>Indicadores sintéticos para ilustrar la experiencia aprobada.</p></div></div></>;
+  const { data, error, retry } = useMetrics('/api/analytics');
+  if (!data) return <><PageHeader page="analytics" /><MetricsState error={error} retry={retry} /></>;
+  return <><PageHeader page="analytics" /><div className="metric-grid four">
+    <Metric icon={MessageCircle} value={String(data.totalAttempts)} label="Intentos registrados" detail="Incluye fallos y fuera de alcance" color="#3461db" />
+    <Metric icon={MessageCircle} value={String(data.organizationalQueries)} label="Consultas organizacionales" detail="Suficientes + insuficientes" color="#3461db" />
+    <Metric icon={CheckCircle2} value={String(data.answeredQueries)} label="Resultados suficientes" detail="Consultas organizacionales" color="#2d8b72" />
+    <Metric icon={AlertCircle} value={String(data.insufficientQueries)} label="Resultados insuficientes" detail="Histórico conservado" color="#d08a31" />
+    <Metric icon={AlertCircle} value={String(data.openGaps)} label="Brechas abiertas" detail="Incluye publicadas sin cierre" color="#d08a31" />
+    <Metric icon={CheckCircle2} value={String(data.resolvedGaps)} label="Brechas resueltas" detail="Cierre explícito" color="#2d8b72" />
+    <Metric icon={FileCheck2} value={String(data.publishedKnowledge)} label="Artículos publicados" detail="NEXA Approved Knowledge" color="#7958c9" />
+    <Metric icon={Workflow} value={String(data.totalGapOccurrences)} label="Ocurrencias de brechas" detail="Demanda contabilizada acumulada" color="#7958c9" />
+  </div><p className="muted-copy">Datos acumulados en SQLite, sin filtro temporal. Los fallos y las preguntas fuera de alcance se excluyen de las métricas organizacionales. Las ocurrencias respetan el conteo existente por sesión; no equivalen al número de consultas.</p><div className="two-col">
+    <Panel title="Brechas por estado"><div className="activity-list">{Object.entries(data.gapsByStatus).map(([status, count]) => <div className="activity" key={status}><strong>{statusLabels[status as KnowledgeGap['status']]}</strong><span>{count}</span></div>)}</div></Panel>
+    <Panel title="Consultas por categoría"><div className="activity-list">{data.categories.map(item => <div className="activity" key={item.category}><strong>{item.category === 'Unclassified' ? 'Sin clasificar' : item.category}</strong><span>{item.count}</span></div>)}{!data.categories.length && <p className="empty-cell">No hay consultas organizacionales registradas.</p>}</div></Panel>
+  </div><Panel title="Brechas abiertas frecuentes"><FrequentGaps gaps={data.frequentOpenGaps} /></Panel></>;
 }
 
 export function App() {
