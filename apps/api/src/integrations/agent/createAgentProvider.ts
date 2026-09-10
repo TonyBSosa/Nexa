@@ -9,5 +9,8 @@ export function createAgentProvider(config: AppConfig): AgentProvider {
     return new FakeAgentProvider(process.env.NODE_ENV !== 'production');
   }
   if (!config.botpress) throw new Error('Botpress configuration is required.');
-  return new BotpressAgentProvider(new BotpressRuntimeClient(config.botpress));
+  return new BotpressAgentProvider(
+    new BotpressRuntimeClient(config.botpress),
+    process.env.NODE_ENV === 'production' ? undefined : console,
+  );
 }

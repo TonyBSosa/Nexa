@@ -65,6 +65,7 @@ export interface BotpressRuntimeClientOptions {
   pollTimeoutMs?: number;
   pollIntervalMs?: number;
   responseSettleMs?: number;
+  incompleteResponseSettleMs?: number;
   clientFactory?: (integrationId?: string) => BotpressRuntimeApi;
 }
 
@@ -104,13 +105,16 @@ export class BotpressRuntimeClient {
   private readonly pollTimeoutMs: number;
   private readonly pollIntervalMs: number;
   private readonly responseSettleMs: number;
+  private readonly incompleteResponseSettleMs: number;
   private readonly clientFactory: (integrationId?: string) => BotpressRuntimeApi;
   private readonly botRuntime: BotpressRuntimeApi;
+  private context: Promise<RuntimeContext> | undefined;
 
   constructor(private readonly options: BotpressRuntimeClientOptions) {
     this.pollTimeoutMs = options.pollTimeoutMs ?? 45_000;
     this.pollIntervalMs = options.pollIntervalMs ?? 500;
     this.responseSettleMs = options.responseSettleMs ?? 1_500;
+    this.incompleteResponseSettleMs = options.incompleteResponseSettleMs ?? 15_000;
     this.clientFactory = options.clientFactory ?? ((integrationId) => new Client({
       token: options.token, botId: options.botId, timeout: options.requestTimeoutMs ?? 10_000,
       ...(integrationId && { integrationId }),
@@ -119,7 +123,7 @@ export class BotpressRuntimeClient {
   }
 
   async ask(text: string, responseComplete?: (texts: string[]) => boolean): Promise<string[]> {
-    const context = await this.discoverContext();
+    const context = await this.runtimeContext();
     const runtime = this.clientFactory(context.integrationId);
     const user = await this.call('createUser', () => runtime.createUser({
       tags: {},
@@ -151,6 +155,14 @@ export class BotpressRuntimeClient {
       createdMessage.message.createdAt,
       responseComplete,
     );
+  }
+
+  private runtimeContext(): Promise<RuntimeContext> {
+    this.context ??= this.discoverContext().catch((error: unknown) => {
+      this.context = undefined;
+      throw error;
+    });
+    return this.context;
   }
 
   private async discoverContext(): Promise<RuntimeContext> {
@@ -191,6 +203,10 @@ export class BotpressRuntimeClient {
       }
       if (responseComplete?.([...texts.values()])) return [...texts.values()];
       if (!responseComplete && lastMessageAt !== undefined && Date.now() - lastMessageAt >= this.responseSettleMs) {
+        return [...texts.values()];
+      }
+      if (responseComplete && lastMessageAt !== undefined
+        && Date.now() - lastMessageAt >= this.incompleteResponseSettleMs) {
         return [...texts.values()];
       }
       const remaining = deadline - Date.now();

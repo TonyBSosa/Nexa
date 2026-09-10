@@ -1,7 +1,7 @@
 import type { AssessQuestionInput, DraftGenerationInput, DraftGenerationResult, QuestionAssessment } from '@nexa/shared';
 import type { AgentProvider } from './AgentProvider.js';
-
 import { normalizeQuestion as normalize, questionKey } from '../../domain/questionKey.js';
+import { generateDeterministicDraft } from './deterministicDraft.js';
 
 const tonerKey = questionKey('What toner does the MX550 use?');
 const retirementKey = questionKey('How do we retire a printer?');
@@ -52,20 +52,6 @@ export class FakeAgentProvider implements AgentProvider {
   }
 
   generateKnowledgeDraft(input: DraftGenerationInput): Promise<DraftGenerationResult> {
-    if (this.allowFailureSimulation && input.evidence.some((item) => normalize(item.content).includes('simular fallo del agente'))) {
-      return Promise.resolve({ status: 'FAILURE' });
-    }
-    if (!input.evidence.length || input.evidence.some((item) => !item.content.trim())) {
-      return Promise.resolve({ status: 'FAILURE' });
-    }
-    const statements = input.evidence.flatMap((item) => item.content
-      .split(/(?<=[.!?])\s+/)
-      .map((statement) => statement.trim())
-      .filter(Boolean));
-    return Promise.resolve({
-      status: 'SUCCESS',
-      title: `Procedimiento: ${input.knowledgeGap.title}`,
-      content: ['Información recopilada para este procedimiento:', ...statements.map((statement, index) => `${index + 1}. ${statement}`)].join('\n'),
-    });
+    return generateDeterministicDraft(input, this.allowFailureSimulation);
   }
 }

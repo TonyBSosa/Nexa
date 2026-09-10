@@ -69,15 +69,15 @@ export class ChatService {
       return {
         queryId, status: 'FAILURE', organizationallyRelevant: null,
         sufficientKnowledge: false, evidence: [],
-        answer: 'El servicio del agente no está disponible. Inténtelo de nuevo.',
-        error: { code: 'AGENT_UNAVAILABLE', message: 'El servicio del agente no está disponible. Inténtelo de nuevo.' },
+        answer: 'No fue posible obtener una evaluación estable del agente. Inténtelo de nuevo.',
+        error: { code: 'AGENT_UNAVAILABLE', message: 'No fue posible obtener una evaluación estable del agente. Inténtelo de nuevo.' },
       };
     }
     if (!assessment.organizationallyRelevant) {
       return {
         queryId, status: 'INSUFFICIENT', organizationallyRelevant: false,
         sufficientKnowledge: false, evidence: [],
-        answer: 'Esta demostración determinista solo admite las preguntas organizacionales indicadas. Pruebe una pregunta de impresoras compatible.',
+        answer: 'La pregunta no corresponde al conocimiento organizacional disponible en NEXA.',
         error: { code: 'OUT_OF_SCOPE', message: 'La pregunta está fuera de los casos organizacionales de esta demostración.' },
       };
     }
@@ -90,7 +90,7 @@ export class ChatService {
     return {
       queryId, status: 'INSUFFICIENT', organizationallyRelevant: true,
       sufficientKnowledge: false,
-      answer: 'El conocimiento organizacional sintético disponible no documenta este procedimiento.',
+      answer: 'No se encontró conocimiento organizacional suficiente y confirmado para responder esta pregunta.',
       evidence: assessment.evidence,
       ...(assessment.suggestedCategory !== undefined && { suggestedCategory: assessment.suggestedCategory }),
       ...(assessment.suggestedDepartment !== undefined && { suggestedDepartment: assessment.suggestedDepartment }),

@@ -3,7 +3,6 @@ import { test } from 'node:test';
 import { ForbiddenError, UnauthorizedError } from '@botpress/client';
 import type { QuestionAssessment } from '@nexa/shared';
 import { readConfig } from '../src/config/env.js';
-import { DomainError } from '../src/domain/workflow.js';
 import { BotpressAgentProvider } from '../src/integrations/agent/BotpressAgentProvider.js';
 import { FakeAgentProvider } from '../src/integrations/agent/FakeAgentProvider.js';
 import {
@@ -58,7 +57,8 @@ function runtimeFor(agentText: string | string[], calls: RuntimeCall[] = []): Bo
       if (integrationId) calls.push({ operation: 'scopeIntegration', input: { integrationId } });
       return runtime;
     },
-    requestTimeoutMs: 100, pollTimeoutMs: 100, pollIntervalMs: 1, responseSettleMs: 0,
+    requestTimeoutMs: 100, pollTimeoutMs: 100, pollIntervalMs: 1,
+    responseSettleMs: 0, incompleteResponseSettleMs: 5,
   });
 }
 
@@ -95,6 +95,36 @@ function envelope(assessment: QuestionAssessment): string {
   });
 }
 
+function sequentialProvider(outcomes: Array<QuestionAssessment | Error | string>) {
+  let calls = 0;
+  const provider = new BotpressAgentProvider({
+    ask: async () => {
+      const outcome = outcomes[calls++];
+      if (outcome === undefined) throw new Error('Unexpected assessment call');
+      if (outcome instanceof Error) throw outcome;
+      return [typeof outcome === 'string' ? outcome : envelope(outcome)];
+    },
+  });
+  return { provider, calls: () => calls };
+}
+
+const sufficientAssessment: QuestionAssessment = {
+  status: 'SUFFICIENT', organizationallyRelevant: true, retrievalCompleted: true,
+  answer: 'La MX550 utiliza NX-550 Black.',
+  evidence: [{ sourceId: 'equipment-guide', title: 'Guía de equipos' }],
+};
+
+const insufficientAssessment: QuestionAssessment = {
+  status: 'INSUFFICIENT', organizationallyRelevant: true, retrievalCompleted: true,
+  answer: null, evidence: [], suggestedDepartment: 'Soporte de TI',
+  suggestedActions: [{ type: 'REQUEST_INFORMATION', description: 'Solicitar el procedimiento.' }],
+};
+
+const unrelatedAssessment: QuestionAssessment = {
+  status: 'INSUFFICIENT', organizationallyRelevant: false, retrievalCompleted: true,
+  answer: null, evidence: [],
+};
+
 test('official-client flow discovers context and returns a structured sufficient assessment', async () => {
   const calls: RuntimeCall[] = [];
   const provider = new BotpressAgentProvider(runtimeFor(envelope({
@@ -118,6 +148,17 @@ test('official-client flow discovers context and returns a structured sufficient
   assert.equal((calls[5]!.input as { payload: { text: string } }).payload.text,
     'NEXA_ASSESSMENT_V1\n\n¿Qué tóner utiliza la impresora MX550?');
   assert.equal('origin' in (calls[5]!.input as object), false);
+});
+
+test('Runtime context discovery is reused across isolated assessment conversations', async () => {
+  const calls: RuntimeCall[] = [];
+  const runtime = runtimeFor(envelope(sufficientAssessment), calls);
+  const provider = new BotpressAgentProvider(runtime);
+  await provider.assessQuestion({ question: 'Primera pregunta' });
+  await provider.assessQuestion({ question: 'Segunda pregunta' });
+  assert.equal(calls.filter((call) => call.operation === 'listConversations').length, 1);
+  assert.equal(calls.filter((call) => call.operation === 'getBot').length, 1);
+  assert.equal(calls.filter((call) => call.operation === 'createConversation').length, 2);
 });
 
 test('structured Botpress assessments preserve insufficient and non-organizational outcomes', async () => {
@@ -161,6 +202,15 @@ test('provider ignores interim prose and waits for the structured assessment', a
   assert.equal(result.organizationallyRelevant, true);
 });
 
+test('provider extracts and validates a JSON envelope wrapped in conversational text', async () => {
+  const wrapped = `Evaluación completada:\n\n\`\`\`json\n${envelope(sufficientAssessment)}\n\`\`\``;
+  const { provider, calls } = sequentialProvider([wrapped]);
+  const result = await provider.assessQuestion({ question: '¿Qué tóner utiliza la impresora MX550?' });
+  assert.equal(result.status, 'SUFFICIENT');
+  assert.match(result.answer ?? '', /NX-550 Black/);
+  assert.equal(calls(), 1);
+});
+
 test('adapter maps explicit Botpress insufficient fields into the neutral contract', async () => {
   const provider = new BotpressAgentProvider(runtimeFor(JSON.stringify({
     schema: 'nexa.assessment.v1',
@@ -176,6 +226,69 @@ test('adapter maps explicit Botpress insufficient fields into the neutral contra
   assert.deepEqual(result.suggestedActions?.map((action) => action.type), [
     'REQUEST_DOCUMENT', 'REQUEST_INFORMATION',
   ]);
+});
+
+test('first insufficient then sufficient uses recovered knowledge and creates no gap', async (t) => {
+  const { provider, calls } = sequentialProvider([insufficientAssessment, sufficientAssessment]);
+  const database = openDatabase(':memory:');
+  t.after(() => database.close());
+  const repository = new SQLiteKnowledgeRepository(database);
+  const result = await new ChatService(provider, repository).chat({ message: '¿Qué tóner utiliza la impresora MX550?' });
+  assert.equal(result.status, 'SUFFICIENT');
+  assert.match(result.answer, /NX-550 Black/);
+  assert.equal(calls(), 2);
+  assert.equal(repository.listGaps().length, 0);
+  assert.equal(repository.listQueries().length, 1);
+});
+
+test('first provider failure retries once and a sufficient result creates no gap', async (t) => {
+  const timeout = new BotpressRuntimeError('TIMEOUT', 'listMessages');
+  const { provider, calls } = sequentialProvider([timeout, sufficientAssessment]);
+  const database = openDatabase(':memory:');
+  t.after(() => database.close());
+  const repository = new SQLiteKnowledgeRepository(database);
+  const result = await new ChatService(provider, repository).chat({ message: '¿Qué tóner utiliza la impresora MX550?' });
+  assert.equal(result.status, 'SUFFICIENT');
+  assert.equal(calls(), 2);
+  assert.equal(repository.listGaps().length, 0);
+});
+
+test('two valid organizational insufficient assessments allow one gap', async (t) => {
+  const { provider, calls } = sequentialProvider([insufficientAssessment, insufficientAssessment]);
+  const database = openDatabase(':memory:');
+  t.after(() => database.close());
+  const repository = new SQLiteKnowledgeRepository(database);
+  const result = await new ChatService(provider, repository).chat({ message: 'Procedimiento interno no documentado' });
+  assert.equal(result.status, 'INSUFFICIENT');
+  assert.equal(result.organizationallyRelevant, true);
+  assert.equal(calls(), 2);
+  assert.equal(repository.listGaps().length, 1);
+  assert.equal(repository.listQueries().length, 1);
+});
+
+test('two provider failures return failure, persist the query, and create no gap', async (t) => {
+  const timeout = new BotpressRuntimeError('TIMEOUT', 'listMessages');
+  const { provider, calls } = sequentialProvider([timeout, timeout]);
+  const database = openDatabase(':memory:');
+  t.after(() => database.close());
+  const repository = new SQLiteKnowledgeRepository(database);
+  const result = await new ChatService(provider, repository).chat({ message: 'Pregunta organizacional' });
+  assert.equal(result.status, 'FAILURE');
+  assert.equal(calls(), 2);
+  assert.equal(repository.listGaps().length, 0);
+  assert.equal(repository.listQueries().length, 1);
+  assert.equal(repository.listQueries()[0]!.knowledgeGapId, null);
+});
+
+test('valid non-organizational assessment is accepted immediately without a gap', async (t) => {
+  const { provider, calls } = sequentialProvider([unrelatedAssessment]);
+  const database = openDatabase(':memory:');
+  t.after(() => database.close());
+  const repository = new SQLiteKnowledgeRepository(database);
+  const result = await new ChatService(provider, repository).chat({ message: '¿Qué hora es en Francia?' });
+  assert.equal(result.organizationallyRelevant, false);
+  assert.equal(calls(), 1);
+  assert.equal(repository.listGaps().length, 0);
 });
 
 test('Runtime failures remain safe for the domain and do not create gaps', async (t) => {
@@ -208,17 +321,15 @@ test('official client authentication and authorization errors retain safe intern
   }
 });
 
-test('malformed Botpress envelopes use the existing safe invalid-provider behavior without writes', async (t) => {
-  const provider = new BotpressAgentProvider(runtimeFor('{"unexpected":true}'));
+test('two malformed Botpress envelopes become a persisted failure without a gap', async (t) => {
+  const { provider, calls } = sequentialProvider(['{"unexpected":true}', '{"stillUnexpected":true}']);
   const database = openDatabase(':memory:');
   t.after(() => database.close());
   const repository = new SQLiteKnowledgeRepository(database);
-  await assert.rejects(
-    new ChatService(provider, repository).chat({ message: 'Pregunta' }),
-    (error: unknown) => error instanceof DomainError && error.code === 'INVALID_PROVIDER_RESPONSE'
-      && !error.message.includes('unexpected'),
-  );
-  assert.equal(repository.listQueries().length, 0);
+  const result = await new ChatService(provider, repository).chat({ message: 'Pregunta' });
+  assert.equal(result.status, 'FAILURE');
+  assert.equal(calls(), 2);
+  assert.equal(repository.listQueries().length, 1);
   assert.equal(repository.listGaps().length, 0);
 });
 
@@ -234,7 +345,9 @@ test('provider configuration defaults to fake and validates Botpress startup set
     DATABASE_PATH: ':memory:', AGENT_PROVIDER: 'botpress', BOTPRESS_TOKEN: 'token', BOTPRESS_BOT_ID: 'bot',
   });
   assert.equal(botpressConfig.botpress?.integrationName, undefined);
-  assert.ok(createAgentProvider(botpressConfig) instanceof BotpressAgentProvider);
+  const selectedProvider = createAgentProvider(botpressConfig);
+  assert.ok(selectedProvider instanceof BotpressAgentProvider);
+  assert.equal(selectedProvider instanceof FakeAgentProvider, false);
   assert.equal(readConfig({
     DATABASE_PATH: ':memory:', AGENT_PROVIDER: 'botpress', BOTPRESS_TOKEN: 'token', BOTPRESS_BOT_ID: 'bot',
     BOTPRESS_INTEGRATION_NAME: 'webchat',
