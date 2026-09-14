@@ -14,27 +14,54 @@ const cases: Array<{
   organizationallyRelevant: boolean;
   answerIncludes?: string;
 }> = [
-  ...Array.from({ length: 5 }, (_, index) => ({
-    name: `mx550-${index + 1}`,
-    question: '¿Qué tóner utiliza la impresora MX550?',
-    status: 'SUFFICIENT' as const, organizationallyRelevant: true, answerIncludes: 'NX-550 Black',
-  })),
   {
-    name: 'managers',
-    question: '¿Quiénes son los gerentes de la empresa?',
-    status: 'SUFFICIENT', organizationallyRelevant: true,
+    name: 'known-mx550',
+    question: '¿Qué tóner utiliza la impresora MX550?',
+    status: 'SUFFICIENT', organizationallyRelevant: true, answerIncludes: 'NX-550 Black',
   },
   {
-    name: 'late-arrival-policy',
+    name: 'known-managers',
+    question: '¿Quiénes son los gerentes de la empresa?',
+    status: 'SUFFICIENT', organizationallyRelevant: true, answerIncludes: 'Valeria Montes',
+  },
+  {
+    name: 'known-it-coordinator',
+    question: '¿Quién es el coordinador de TI?',
+    status: 'SUFFICIENT', organizationallyRelevant: true, answerIncludes: 'Esteban Cruz',
+  },
+  {
+    name: 'unknown-printer-retirement',
+    question: '¿Cuál es el procedimiento de la empresa para dar de baja una impresora?',
+    status: 'INSUFFICIENT', organizationallyRelevant: true,
+  },
+  {
+    name: 'unknown-late-arrival-policy',
     question: '¿Existe una política para llegadas tarde?',
     status: 'INSUFFICIENT', organizationallyRelevant: true,
   },
   {
-    name: 'france-time',
-    question: '¿Qué hora es en Francia?',
+    name: 'unknown-remote-work-procedure',
+    question: '¿Cuál es el procedimiento de la empresa para solicitar trabajo remoto?',
+    status: 'INSUFFICIENT', organizationallyRelevant: true,
+  },
+  {
+    name: 'unrelated-france-capital',
+    question: '¿Cuál es la capital de Francia?',
+    status: 'INSUFFICIENT', organizationallyRelevant: false,
+  },
+  {
+    name: 'unrelated-arithmetic',
+    question: '¿Cuánto es 2 + 2?',
+    status: 'INSUFFICIENT', organizationallyRelevant: false,
+  },
+  {
+    name: 'unrelated-weather',
+    question: '¿Cómo está el clima en San Pedro Sula?',
     status: 'INSUFFICIENT', organizationallyRelevant: false,
   },
 ];
+
+const repetitions = 3;
 
 function required(name: 'AGENT_PROVIDER' | 'BOTPRESS_TOKEN' | 'BOTPRESS_BOT_ID'): string {
   const value = process.env[name]?.trim();
@@ -105,18 +132,28 @@ async function main() {
     const service = new ChatService(provider, new SQLiteKnowledgeRepository(database));
     const failures: string[] = [];
     for (const expected of cases) {
-      const eventStart = events.length;
-      attemptSummaries = [];
-      const response = await service.chat({
-        message: expected.question,
-        clientSessionId: randomUUID(),
-      });
-      const providerEvents = events.slice(eventStart);
-      console.log(JSON.stringify({ name: expected.name, response, providerEvents, attemptSummaries }, null, 2));
-      if (response.status !== expected.status
-        || response.organizationallyRelevant !== expected.organizationallyRelevant
-        || (expected.answerIncludes && !response.answer.includes(expected.answerIncludes))) {
-        failures.push(expected.name);
+      for (let repetition = 1; repetition <= repetitions; repetition++) {
+        const eventStart = events.length;
+        attemptSummaries = [];
+        const startedAt = Date.now();
+        const response = await service.chat({
+          message: expected.question,
+          clientSessionId: randomUUID(),
+        });
+        const providerEvents = events.slice(eventStart);
+        const passed = response.status === expected.status
+          && response.organizationallyRelevant === expected.organizationallyRelevant
+          && (!expected.answerIncludes || response.answer.includes(expected.answerIncludes));
+        console.log(JSON.stringify({
+          name: expected.name,
+          repetition,
+          durationMs: Date.now() - startedAt,
+          passed,
+          response,
+          providerEvents,
+          attemptSummaries,
+        }, null, 2));
+        if (!passed) failures.push(`${expected.name}-${repetition}`);
       }
     }
     if (failures.length) throw new Error(`Unexpected Botpress assessments: ${failures.join(', ')}`);

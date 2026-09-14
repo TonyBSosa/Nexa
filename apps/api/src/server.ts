@@ -1,9 +1,10 @@
 import { createApp } from './app.js';
-import { config } from './config/env.js';
+import { readConfig } from './config/env.js';
 import { createAgentProvider } from './integrations/agent/createAgentProvider.js';
 import { openDatabase } from './persistence/database.js';
 import { SQLiteKnowledgeRepository } from './repositories/knowledge.js';
 
+const config = readConfig();
 const database = openDatabase(config.databasePath);
 const app = createApp(createAgentProvider(config), new SQLiteKnowledgeRepository(database));
 

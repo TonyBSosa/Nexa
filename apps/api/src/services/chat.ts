@@ -78,7 +78,7 @@ export class ChatService {
         queryId, status: 'INSUFFICIENT', organizationallyRelevant: false,
         sufficientKnowledge: false, evidence: [],
         answer: 'La pregunta no corresponde al conocimiento organizacional disponible en NEXA.',
-        error: { code: 'OUT_OF_SCOPE', message: 'La pregunta está fuera de los casos organizacionales de esta demostración.' },
+        error: { code: 'OUT_OF_SCOPE', message: 'La pregunta está fuera del conocimiento organizacional disponible.' },
       };
     }
     if (assessment.status === 'SUFFICIENT') {

@@ -4,12 +4,12 @@ NEXA is an organizational knowledge intelligence concept that turns questions an
 
 ## Current Stage
 
-Knowledge Recovery Loop: SQLite-backed gaps now progress through triage, simulated recovery, evidence collection, versioned drafting, human review, local publication, and explicit resolution. Published articles immediately answer matching chat questions through NEXA Approved Knowledge. Employee questions use the NEXA React assistant and Express backend, which selects FakeAgentProvider by default or BotpressAgentProvider when configured. Real external actions, authentication, Tailwind/shadcn, and Docker remain pending.
+Knowledge Recovery Loop: SQLite-backed gaps now progress through triage, recovery, evidence collection, versioned drafting, human review, local publication, and explicit resolution. Published articles immediately answer matching chat questions through NEXA Approved Knowledge. Employee questions use the NEXA React assistant, Express backend, and Botpress provider by default. FakeAgentProvider is reserved for automated tests. Real external actions, authentication, Tailwind/shadcn, and Docker remain pending.
 
 ## Prerequisites
 
 - Node.js 24.14 or newer within major 24; npm 11.
-- Git and two development terminals. No database or Docker is required.
+- Git. No external database or Docker is required.
 
 TypeScript 6 is used because it is compatible with the configured TypeScript ESLint tooling. The root lockfile records resolved dependencies for all workspaces.
 
@@ -38,16 +38,10 @@ When intentionally adding dependencies, use npm install and include the updated 
 
 ## Run Locally
 
-Terminal one, from the root:
+From the repository root:
 
 ```sh
-npm run dev:api
-```
-
-Terminal two:
-
-```sh
-npm run dev:web
+npm run dev
 ```
 
 - Web: http://127.0.0.1:5173
@@ -55,17 +49,17 @@ npm run dev:web
 
 Click **Check API health** in the development page. Expected result: `nexa-api: ok`. The browser client calls `/api/health` on Vite, which proxies to the configured backend URL. No CORS package is needed. The health button is omitted from production builds.
 
-Defaults work without environment files. For API-only configuration, copy `.env.example` to `apps/api/.env`; API development, production startup, and the Botpress smoke script load that file before importing application modules. npm runs `@nexa/api` scripts from `apps/api`, so this location is stable whether the script is invoked from the repository root or workspace directory. For a different frontend proxy target, set `$env:API_URL = 'http://127.0.0.1:3001'` in the web terminal before starting. Restart after changing configuration. Never put populated `.env` files, secrets, or tokens in browser-exposed configuration or Git.
+Copy `.env.example` to `apps/api/.env` and configure Botpress before starting. API development, production startup, and the Botpress smoke script load that file before importing application modules. npm runs `@nexa/api` scripts from `apps/api`, so this location is stable whether the script is invoked from the repository root or workspace directory. The root `npm run dev` command starts both services and recognizes an existing healthy NEXA instance instead of opening duplicate ports. For a different frontend proxy target, set `$env:API_URL = 'http://127.0.0.1:3001'` before starting. Restart after changing configuration. Never put populated `.env` files, secrets, or tokens in browser-exposed configuration or Git.
 
 The floating Botpress Webchat is retained only as a development connectivity diagnostic. It is disabled by default and cannot be included in production builds. To reproduce the proof, set `VITE_ENABLE_BOTPRESS_WEBCHAT=true` for the web development process; the two optional URL overrides in `.env.example` are public browser configuration only. The diagnostic logs concise `[NEXA Webchat]` event summaries and does not participate in the product request path, persist events, or create Knowledge Gaps.
 
-Set `AGENT_PROVIDER=fake` for the deterministic provider. To use a deployed Botpress bot, set `AGENT_PROVIDER=botpress`, `BOTPRESS_TOKEN`, and `BOTPRESS_BOT_ID` in `apps/api/.env`. `BOTPRESS_INTEGRATION_NAME` is an optional context selector; without it, the adapter uses the most recently active conversation context. Missing required Botpress settings or an unknown provider value stops startup with a configuration error. Startup logs the selected provider without logging credentials.
+Set `AGENT_PROVIDER=botpress`, `BOTPRESS_TOKEN`, and `BOTPRESS_BOT_ID` in `apps/api/.env`. Use `BOTPRESS_INTEGRATION_NAME=webchat` for the Runtime conversation path used by NEXA; the old `BOTPRESS_INTEGRATION_ALIAS=edge` setting is not compatible with this request flow. Without a selector, the adapter finds a compatible active Runtime context. Missing required Botpress settings or an unknown provider value stops startup with a configuration error instead of silently using mock responses. Startup logs the selected provider without logging credentials.
 
 The Botpress adapter uses the official TypeScript client. A bot-context client discovers a proven integration/channel once per API process and resolves that installed integration's ID from bot configuration. A second client scoped with `integrationId` creates an isolated user and conversation, sends the incoming text message, and collects outgoing text until it receives a valid assessment envelope, reaches a bounded timeout, or receives only non-structured output followed by a bounded quiet period. `x-integration-alias` is not required. The old bot-context creation attempt caused the 403; Runtime creation must run in integration context. BotpressAgentProvider prefixes assessment questions with `NEXA_ASSESSMENT_V1`, then extracts and validates only `nexa.assessment.v1` JSON, including JSON wrapped in Markdown or conversational text. Conversational prose never determines relevance or status. A failure or malformed response receives one fresh retry. A relevant INSUFFICIENT result requires one fresh confirming assessment; either SUFFICIENT result wins, and only two valid relevant INSUFFICIENT results permit a gap. Draft generation remains deterministic to preserve Knowledge Operations.
 
-Run the opt-in live provider smoke outside normal tests and CI with `npm run smoke:botpress -w @nexa/api`. It requires `AGENT_PROVIDER=botpress`, `BOTPRESS_TOKEN`, and `BOTPRESS_BOT_ID`; it runs the MX550 question five times through ChatService, then checks managers, an undocumented late-arrival policy, and a non-organizational time question. Safe provider events show retries, recovered retrieval, and confirmed insufficiency without logging prompts or credentials.
+Run the opt-in live provider smoke outside normal tests and CI with `npm run smoke:botpress -w @nexa/api`. It requires `AGENT_PROVIDER=botpress`, `BOTPRESS_TOKEN`, and `BOTPRESS_BOT_ID`. It checks three documented questions, three organizational knowledge gaps, and three unrelated questions three times each through `ChatService`. Output includes duration, safe retry events, and structured response summaries without logging prompts or credentials.
 
-## Deterministic Chat Development
+## Organizational Chat
 
 `POST /api/chat` accepts `{"message":"...","clientSessionId":"optional-uuid"}`. Use the question form and Send button at the local web URL. Each valid submission receives a persisted Query UUID, including non-organizational questions and controlled provider failures. Only a relevant INSUFFICIENT result confirmed by two valid Botpress assessments creates/reuses a gap and returns `knowledgeGapId`. The web client allows the bounded two-attempt backend flow to finish before reporting a network timeout. Canonical approved knowledge is checked before any external provider call and rechecked inside the final query-write transaction. It returns grounded `nexa-approved` evidence even when Botpress is unavailable or an in-flight assessment becomes stale during publication.
 
@@ -76,7 +70,7 @@ Run the opt-in live provider smoke outside normal tests and CI with `npm run smo
 | ¿Cuál es la capital de Francia? | 200 with organizationallyRelevant false; successful domain assessment, not a gap candidate. |
 | simular fallo del agente | 503 FAILURE with a sanitized message; trigger enabled only outside NODE_ENV=production. |
 
-Spanish is primary for visible examples, default questions, and demo response text. English aliases remain supported and tested: “What toner does the MX550 printer use?”, “What is the company procedure for retiring a printer?”, “What is the capital of France?”, and “simulate agent failure”. Status values, action types, HTTP behavior, and provider-neutral contracts are unchanged.
+The product interface starts with an empty composer and neutral organizational guidance. Deterministic fixtures and their aliases remain confined to automated tests; they are not selected by normal application startup or presented as suggested questions.
 
 Only the small explicit English/Spanish fixture aliases are recognized. Other questions (including greetings and unsupported organizational questions) return the out-of-scope development response; this fake is not a general relevance classifier. It makes no external calls. No proposed action is executed.
 
@@ -95,13 +89,13 @@ Matching lowercases, removes accents, normalizes punctuation (including Spanish 
 - `GET /api/knowledge-gaps/:id`: a gap object, or 404 NOT_FOUND.
 - `GET /api/knowledge`: locally published NEXA Approved Knowledge articles.
 
-## Knowledge Operations Demo
+## Knowledge Operations
 
-The development page includes a plain Knowledge Operations harness. Ask “¿Cuál es el procedimiento de la empresa para dar de baja una impresora?”, copy its `knowledgeGapId` into the harness, and use the controls in order:
+The Knowledge Operations page opens gaps created from organizational questions and supports the following controlled lifecycle:
 
 1. Save triage metadata (state stays DETECTED), then explicitly confirm review (`DETECTED → TRIAGED`).
 2. Select a proposed action, then explicitly approve starting it (`ACTION_PROPOSED → IN_PROGRESS`). The action is simulated; no email, meeting, document request, or external task is executed.
-3. Add the prefilled synthetic evidence (state stays IN_PROGRESS), explicitly confirm KNOWLEDGE_COLLECTED, and generate a versioned draft (state stays KNOWLEDGE_COLLECTED). Inspect it and explicitly submit AWAITING_APPROVAL. FakeAgentProvider builds the draft only from the supplied evidence.
+3. Add verified evidence manually (state stays IN_PROGRESS), explicitly confirm KNOWLEDGE_COLLECTED, and generate a versioned draft (state stays KNOWLEDGE_COLLECTED). Inspect it and explicitly submit AWAITING_APPROVAL. Draft generation uses only the supplied evidence.
 4. Approve the current fresh revision. Approval, local article publication, and `PUBLISHED` commit atomically. Changes requested or rejection return the gap to `KNOWLEDGE_COLLECTED` and require a newer draft.
 5. Ask the same question again to receive a `SUFFICIENT` response from NEXA Approved Knowledge, then explicitly close the gap (`PUBLISHED → RESOLVED`).
 

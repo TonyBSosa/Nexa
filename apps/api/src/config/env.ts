@@ -24,7 +24,7 @@ export function readConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
   }
   const configuredDatabasePath = environment.DATABASE_PATH ?? './data/nexa.db';
   if (!configuredDatabasePath.trim()) throw new Error('DATABASE_PATH must not be empty.');
-  const agentProvider = environment.AGENT_PROVIDER ?? 'fake';
+  const agentProvider = environment.AGENT_PROVIDER ?? 'botpress';
   if (agentProvider !== 'fake' && agentProvider !== 'botpress') {
     throw new Error('AGENT_PROVIDER must be either "fake" or "botpress".');
   }
@@ -49,5 +49,3 @@ export function readConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     },
   };
 }
-
-export const config = readConfig();

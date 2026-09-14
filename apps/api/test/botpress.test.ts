@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ForbiddenError, UnauthorizedError } from '@botpress/client';
+import { ForbiddenError, UnauthorizedError, UnknownError } from '@botpress/client';
 import type { QuestionAssessment } from '@nexa/shared';
 import { readConfig } from '../src/config/env.js';
 import { BotpressAgentProvider } from '../src/integrations/agent/BotpressAgentProvider.js';
@@ -22,11 +22,15 @@ function runtimeFor(agentText: string | string[], calls: RuntimeCall[] = []): Bo
   const runtime: BotpressRuntimeApi = {
     listConversations: (input) => {
       calls.push({ operation: 'listConversations', input });
-      return Promise.resolve({ conversations: [{ channel: 'channel', integration: 'webchat' }] });
+      return Promise.resolve({ conversations: [
+        { channel: 'channel', integration: 'edge' },
+        { channel: 'channel', integration: 'webchat' },
+      ] });
     },
     getBot: (input) => {
       calls.push({ operation: 'getBot', input });
       return Promise.resolve({ bot: { integrations: {
+        edge: { id: 'integration-edge', name: 'agi/edge', enabled: true, status: 'registered' },
         webchat: { id: 'integration-webchat', name: 'webchat', enabled: true, status: 'registered' },
       } } });
     },
@@ -321,6 +325,18 @@ test('official client authentication and authorization errors retain safe intern
   }
 });
 
+test('SDK transport failures are not mislabeled as HTTP 500 responses', async () => {
+  await assert.rejects(
+    failingRuntime(new UnknownError('fetch failed')).ask('Pregunta'),
+    (error: unknown) => error instanceof BotpressRuntimeError
+      && error.kind === 'UNAVAILABLE'
+      && error.operation === 'listConversations'
+      && error.status === undefined
+      && error.providerType === 'Unknown'
+      && error.providerMessage === 'fetch failed',
+  );
+});
+
 test('two malformed Botpress envelopes become a persisted failure without a gap', async (t) => {
   const { provider, calls } = sequentialProvider(['{"unexpected":true}', '{"stillUnexpected":true}']);
   const database = openDatabase(':memory:');
@@ -333,8 +349,9 @@ test('two malformed Botpress envelopes become a persisted failure without a gap'
   assert.equal(repository.listGaps().length, 0);
 });
 
-test('provider configuration defaults to fake and validates Botpress startup settings', () => {
-  const fakeConfig = readConfig({ DATABASE_PATH: ':memory:' });
+test('provider configuration defaults to Botpress, keeps fake explicit, and validates startup settings', () => {
+  assert.throws(() => readConfig({ DATABASE_PATH: ':memory:' }), /BOTPRESS_TOKEN/);
+  const fakeConfig = readConfig({ DATABASE_PATH: ':memory:', AGENT_PROVIDER: 'fake' });
   assert.equal(fakeConfig.agentProvider, 'fake');
   assert.ok(createAgentProvider(fakeConfig) instanceof FakeAgentProvider);
   assert.throws(() => readConfig({ DATABASE_PATH: ':memory:', AGENT_PROVIDER: 'botpress' }), /BOTPRESS_TOKEN/);

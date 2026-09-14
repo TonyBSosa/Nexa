@@ -34,9 +34,9 @@ function Badge({ children, tone = 'neutral' }: { children: React.ReactNode; tone
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }
 
-function PageHeader({ page, demo = false }: { page: PageKey; demo?: boolean }) {
+function PageHeader({ page }: { page: PageKey }) {
   const details = pages[page];
-  return <div className="page-header"><div><p className="eyebrow">{details.eyebrow}</p><h1>{details.label}</h1><p>{details.description}</p></div>{demo && <Badge>Datos de demostración</Badge>}</div>;
+  return <div className="page-header"><div><p className="eyebrow">{details.eyebrow}</p><h1>{details.label}</h1><p>{details.description}</p></div></div>;
 }
 
 function Panel({ title, children, className = '' }: { title?: string; children: React.ReactNode; className?: string }) {
@@ -101,15 +101,18 @@ function Sources() {
     ['Notion', 'Páginas de conocimiento de los equipos.', 'No configurado'],
     ['Documentos internos', 'Carga manual de documentos aprobados.', 'No configurado'],
   ] as const;
-  return <><PageHeader page="sources" demo /><Panel title="Fuentes de conocimiento"><p className="panel-intro">Las integraciones futuras se muestran de forma explícita; no están conectadas.</p><div className="source-grid">{sources.map(([name, description, status]) => <article className={`source-card ${status === 'Activa' ? 'source-active' : ''}`} key={name}><span className="source-icon"><Database size={19} /></span><div><div className="source-title"><strong>{name}</strong><Badge tone={status === 'Activa' ? 'green' : 'neutral'}>{status}</Badge></div><p>{description}</p><small>{status === 'Activa' ? 'Almacenamiento local aprobado' : 'Integración no implementada'}</small></div></article>)}</div></Panel></>;
-}
-
-function BarRows({ items }: { items: Array<[string, number]> }) {
-  return <div className="bars">{items.map(([name, value]) => <div className="bar-row" key={name}><div><span>{name}</span><small>{value}%</small></div><div className="bar-track"><div style={{ width: `${value}%` }} /></div></div>)}</div>;
+  return <><PageHeader page="sources" /><Panel title="Fuentes de conocimiento"><p className="panel-intro">Las integraciones futuras se muestran de forma explícita; no están conectadas.</p><div className="source-grid">{sources.map(([name, description, status]) => <article className={`source-card ${status === 'Activa' ? 'source-active' : ''}`} key={name}><span className="source-icon"><Database size={19} /></span><div><div className="source-title"><strong>{name}</strong><Badge tone={status === 'Activa' ? 'green' : 'neutral'}>{status}</Badge></div><p>{description}</p><small>{status === 'Activa' ? 'Almacenamiento local aprobado' : 'Integración no implementada'}</small></div></article>)}</div></Panel></>;
 }
 
 function Health() {
-  return <><PageHeader page="health" demo /><div className="metric-grid four"><Metric icon={CheckCircle2} value="78,4%" label="Cobertura estimada" detail="Demo" color="#2d8b72" /><Metric icon={AlertCircle} value="24" label="Brechas abiertas" detail="6 prioritarias" color="#d08a31" /><Metric icon={Workflow} value="9" label="Brechas recurrentes" detail="Demo" color="#7958c9" /><Metric icon={FileCheck2} value="67" label="Piezas publicadas" detail="Demo" color="#3461db" /></div><div className="two-col"><Panel title="Temas con mayor demanda"><BarRows items={[['Baja de equipos', 86], ['Accesos y credenciales', 71], ['Compras y proveedores', 54], ['Procedimientos financieros', 39]]} /></Panel><Panel title="Áreas con brechas"><BarRows items={[['TI', 72], ['Finanzas', 48], ['RRHH', 36], ['Operaciones', 29]]} /></Panel></div></>;
+  const { data, error, retry } = useMetrics('/api/analytics');
+  if (!data) return <><PageHeader page="health" /><MetricsState error={error} retry={retry} /></>;
+  return <><PageHeader page="health" /><div className="metric-grid four">
+    <Metric icon={CheckCircle2} value={data.queryAnswerRate === null ? 'Sin datos' : Math.round(data.queryAnswerRate * 100) + '%'} label="Cobertura observada" detail={data.answeredQueries + ' consultas respondidas'} color="#2d8b72" />
+    <Metric icon={AlertCircle} value={String(data.openGaps)} label="Brechas abiertas" detail={data.totalGapOccurrences + ' ocurrencias'} color="#d08a31" />
+    <Metric icon={Workflow} value={String(data.inRecoveryGaps)} label="En recuperación" detail="Flujo activo" color="#7958c9" />
+    <Metric icon={FileCheck2} value={String(data.publishedKnowledge)} label="Conocimiento publicado" detail={data.resolvedGaps + ' brechas resueltas'} color="#3461db" />
+  </div><Panel title="Brechas abiertas frecuentes"><FrequentGaps gaps={data.frequentOpenGaps} /></Panel></>;
 }
 
 function Analytics() {
@@ -139,5 +142,5 @@ export function App() {
     sources: <Sources />, operations: <><PageHeader page="operations" /><KnowledgeOperationsTest initialGapId={selectedGapId} /></>, health: <Health />, analytics: <Analytics />,
   })[page], [page, selectedGapId]);
 
-  return <div className="app-shell"><aside className={`sidebar ${menuOpen ? 'sidebar-open' : ''}`}><div className="brand"><div className="brand-mark">N</div><div><strong>NEXA</strong><span>Organizational Knowledge<br />Intelligence</span></div><button className="mobile-close" onClick={() => setMenuOpen(false)} aria-label="Cerrar menú"><X size={18} /></button></div><nav aria-label="Navegación principal">{nav.map(([key, Icon]) => <button key={key} className={`nav-item ${page === key ? 'active' : ''}`} onClick={() => { setPage(key); setMenuOpen(false); }}><Icon size={17} /><span>{pages[key].label}</span>{page === key && <ChevronRight className="nav-arrow" size={14} />}</button>)}</nav><div className="sidebar-bottom"><div className="org-avatar">ED</div><div><strong>Empresa Demo</strong><span>Entorno de demostración</span></div><Settings2 size={16} /></div></aside>{menuOpen && <button className="mobile-overlay" onClick={() => setMenuOpen(false)} aria-label="Cerrar menú" />}<div className="main-area"><header className="topbar"><button className="mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Abrir menú"><Menu size={20} /></button><span className="topbar-title">{pages[page].label}</span><div className="topbar-actions"><div className="search-button"><Search size={16} /><span>Buscar en NEXA</span><kbd>Ctrl K</kbd></div><Bell size={18} /><div className="avatar">JD</div></div></header><main className="content">{content}</main></div></div>;
+  return <div className="app-shell"><aside className={`sidebar ${menuOpen ? 'sidebar-open' : ''}`}><div className="brand"><div className="brand-mark">N</div><div><strong>NEXA</strong><span>Organizational Knowledge<br />Intelligence</span></div><button className="mobile-close" onClick={() => setMenuOpen(false)} aria-label="Cerrar menú"><X size={18} /></button></div><nav aria-label="Navegación principal">{nav.map(([key, Icon]) => <button key={key} className={`nav-item ${page === key ? 'active' : ''}`} onClick={() => { setPage(key); setMenuOpen(false); }}><Icon size={17} /><span>{pages[key].label}</span>{page === key && <ChevronRight className="nav-arrow" size={14} />}</button>)}</nav><div className="sidebar-bottom"><div className="org-avatar">OR</div><div><strong>Tu organización</strong><span>Conocimiento conectado</span></div><Settings2 size={16} /></div></aside>{menuOpen && <button className="mobile-overlay" onClick={() => setMenuOpen(false)} aria-label="Cerrar menú" />}<div className="main-area"><header className="topbar"><button className="mobile-menu" onClick={() => setMenuOpen(true)} aria-label="Abrir menú"><Menu size={20} /></button><span className="topbar-title">{pages[page].label}</span><div className="topbar-actions"><div className="search-button"><Search size={16} /><span>Buscar en NEXA</span><kbd>Ctrl K</kbd></div><Bell size={18} /><div className="avatar">N</div></div></header><main className="content">{content}</main></div></div>;
 }

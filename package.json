@@ -6,6 +6,7 @@
   "engines": { "node": ">=24.14.0 <25", "npm": ">=11 <12" },
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
+    "dev": "npm run build -w @nexa/shared && node scripts/dev.mjs",
     "dev:web": "npm run build -w @nexa/shared && npm run dev -w @nexa/web",
     "dev:api": "npm run build -w @nexa/shared && npm run dev -w @nexa/api",
     "build": "npm run build -w @nexa/shared && npm run build -w @nexa/api && npm run build -w @nexa/web",

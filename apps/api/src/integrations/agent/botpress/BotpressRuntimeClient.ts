@@ -3,6 +3,7 @@ import {
   ForbiddenError,
   OperationTimeoutError,
   UnauthorizedError,
+  UnknownError,
   isApiError,
 } from '@botpress/client';
 
@@ -96,7 +97,12 @@ function integrationError(error: unknown, operation: RuntimeOperation): Botpress
       isApiError(error) ? error.type : undefined, error.message);
   }
   if (isApiError(error)) {
-    return new BotpressRuntimeError('UNAVAILABLE', operation, error.code, error.type, error.message);
+    // The SDK wraps transport failures such as `fetch failed` in UnknownError with
+    // a synthetic code 500. Do not report that value as an HTTP response status.
+    return new BotpressRuntimeError(
+      'UNAVAILABLE', operation, error instanceof UnknownError ? undefined : error.code,
+      error.type, error.message,
+    );
   }
   return new BotpressRuntimeError('UNAVAILABLE', operation);
 }
@@ -124,6 +130,21 @@ export class BotpressRuntimeClient {
 
   async ask(text: string, responseComplete?: (texts: string[]) => boolean): Promise<string[]> {
     const context = await this.runtimeContext();
+    try {
+      return await this.askInContext(context, text, responseComplete);
+    } catch (error) {
+      // A cached integration/channel can become stale between API restarts or
+      // Botpress deployments. Let the provider's bounded retry rediscover it.
+      this.context = undefined;
+      throw error;
+    }
+  }
+
+  private async askInContext(
+    context: RuntimeContext,
+    text: string,
+    responseComplete?: (texts: string[]) => boolean,
+  ): Promise<string[]> {
     const runtime = this.clientFactory(context.integrationId);
     const user = await this.call('createUser', () => runtime.createUser({
       tags: {},
@@ -172,16 +193,25 @@ export class BotpressRuntimeClient {
       pageSize: 50,
       ...(this.options.integrationName && { integrationName: this.options.integrationName }),
     }));
-    const match = result.conversations.find((item) => nonempty(item.integration) && nonempty(item.channel)
-      && (!this.options.integrationName || item.integration === this.options.integrationName));
-    if (!match) throw new BotpressRuntimeError('INVALID_PROVIDER_RESPONSE', 'listConversations');
     const bot = await this.call('getBot', () => this.botRuntime.getBot({ id: this.options.botId }));
-    const installed = Object.values(bot.bot.integrations)
-      .find((item) => item.enabled && item.status === 'registered' && item.name === match.integration);
-    if (!installed || !nonempty(installed.id)) {
+    const conversations = result.conversations.filter((item) => nonempty(item.integration) && nonempty(item.channel)
+      && (!this.options.integrationName || item.integration === this.options.integrationName));
+    if (!conversations.length) throw new BotpressRuntimeError('INVALID_PROVIDER_RESPONSE', 'listConversations');
+    const integrations = Object.values(bot.bot.integrations)
+      .filter((item) => item.enabled && item.status === 'registered' && nonempty(item.id));
+    // Prefer an exact Runtime/installed name pair across all recent contexts. A
+    // Vibe conversation can report `edge` while the installed package is named
+    // `agi/edge`; it must not hide a proven exact `webchat` context behind it.
+    const resolve = (namespaced: boolean) => conversations.flatMap((conversation) => integrations
+      .filter((integration) => namespaced
+        ? integration.name.endsWith(`/${conversation.integration}`)
+        : integration.name === conversation.integration)
+      .map((integration) => ({ conversation, integration })))[0];
+    const match = resolve(false) ?? resolve(true);
+    if (!match) {
       throw new BotpressRuntimeError('INVALID_PROVIDER_RESPONSE', 'getBot');
     }
-    return { integrationId: installed.id, channel: match.channel };
+    return { integrationId: match.integration.id, channel: match.conversation.channel };
   }
 
   private async pollForOutgoing(
