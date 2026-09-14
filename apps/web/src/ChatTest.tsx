@@ -34,6 +34,7 @@ export function ChatTest({ onOpenGap }: { onOpenGap?: (id: string) => void }) {
     const cleanMessage = message.trim();
     if (!cleanMessage) return;
     setSubmitted(cleanMessage);
+    setMessage('');
     setLoading(true);
     setError('');
     setResult(null);
