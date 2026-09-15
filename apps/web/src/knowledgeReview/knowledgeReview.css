@@ -1,0 +1,38 @@
+.kr-empty{margin:10px 0;color:#8c97a9;font-size:.76rem}
+.kr-meta{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;color:#9aa4b3;font-size:.69rem}
+.kr-text-block{margin:6px 0 0;color:#66738a;font-size:.75rem;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
+.kr-note{margin:8px 0 0;padding:8px;border-radius:5px;color:#66738a;background:#f5f7fa;font-size:.74rem;line-height:1.45;white-space:pre-wrap}
+.kr-note .context-label{margin-bottom:4px}
+.kr-link{display:inline-flex;align-items:center;gap:4px;color:#3461c4;font-size:.74rem;overflow-wrap:anywhere}
+.kr-list{margin:0;padding-left:18px;color:#66738a;font-size:.75rem;line-height:1.5}
+
+.kr-diff{border:1px solid #e6eaf0;border-radius:6px;background:#fff;overflow:hidden}
+.kr-diff-header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border-bottom:1px solid #e6eaf0;color:#49566d;background:#fafbfe;font-size:.78rem}
+.kr-diff-counts{font-size:.72rem;font-weight:650}
+.kr-added-count{color:#257a63}
+.kr-removed-count{color:#b2555c}
+.kr-diff-title{padding:9px 11px;border-bottom:1px solid #e6eaf0}
+.kr-diff-body{max-height:420px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.74rem}
+.kr-diff-line{display:grid;grid-template-columns:3ch 3ch 2ch minmax(0,1fr);gap:6px;padding:1px 11px;color:#536079;line-height:1.5}
+.kr-diff-title .kr-diff-line{grid-template-columns:2ch minmax(0,1fr);padding:1px 0}
+.kr-line-number{color:#a9b2c0;text-align:right;user-select:none}
+.kr-marker{user-select:none}
+.kr-text{white-space:pre-wrap;overflow-wrap:anywhere}
+.kr-added{background:#e7f5ef}
+.kr-added .kr-marker{color:#257a63}
+.kr-removed{background:#fcedee}
+.kr-removed .kr-marker{color:#b2555c}
+
+.kr-history{display:flex;flex-direction:column;gap:10px;margin:0;padding:0;list-style:none}
+.kr-history-item{padding:10px 11px;border:1px solid #e6eaf0;border-radius:6px;background:#fafbfe}
+.kr-history-header{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:3px;color:#49566d;font-size:.75rem}
+.kr-history-header time{margin-left:auto;color:#9aa4b3;font-size:.69rem}
+
+.kr-evidence-list{display:flex;flex-direction:column;gap:10px;margin:0;padding:0;list-style:none}
+.kr-evidence{padding:11px;border:1px solid #e6eaf0;border-radius:6px;background:#fafbfe}
+.kr-evidence.kr-withdrawn{opacity:.75;background:#f7f7f8}
+.kr-evidence-header{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin-bottom:3px;color:#49566d;font-size:.78rem}
+.kr-file{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:6px;color:#5375d1}
+.kr-file-name{color:#49566d;font-size:.75rem;overflow-wrap:anywhere}
+.kr-meeting{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.kr-meeting details summary{cursor:pointer;color:#536079;font-size:.74rem}
