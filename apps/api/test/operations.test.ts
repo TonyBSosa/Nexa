@@ -13,6 +13,7 @@ import { openDatabase } from '../src/persistence/database.js';
 import { PersistenceError, SQLiteKnowledgeRepository } from '../src/repositories/knowledge.js';
 import { ChatService } from '../src/services/chat.js';
 import { KnowledgeOperationsService } from '../src/services/knowledgeOperations.js';
+import { acceptAndClassify, metadataFor } from './reviewFixture.js';
 
 const question = '¿Cuál es el procedimiento de la empresa para dar de baja una impresora?';
 const evidenceText = 'Antes de retirar una impresora, Soporte de TI verifica que el equipo ya no esté asignado a un usuario. El número de activo y número de serie se registran. Gestión de Activos actualiza el inventario. Si el equipo contiene almacenamiento interno, TI realiza el borrado correspondiente. Finalmente, Gestión de Activos autoriza la baja y registra el destino del equipo.';
@@ -38,7 +39,7 @@ function prepareForEvidence(repository: SQLiteKnowledgeRepository, operations: K
   assert.throws(() => operations.transition(gapId, { fromStatus: 'DETECTED', toStatus: 'IN_PROGRESS' }), DomainError);
   const triaged = operations.triage(gapId, { priority: 'HIGH', category: 'TI / Equipos' });
   assert.equal(triaged.status, 'DETECTED');
-  operations.transition(gapId, { fromStatus: 'DETECTED', toStatus: 'TRIAGED' });
+  acceptAndClassify(repository, gapId);
   const action = triaged.suggestedActions[0]!;
   assert.equal(operations.transition(gapId, {
     fromStatus: 'TRIAGED', toStatus: 'ACTION_PROPOSED', selectedActionId: action.id,
@@ -145,7 +146,10 @@ test('HTTP operations expose the detailed workflow and approved knowledge', asyn
   const gapId = (chatResult.body as unknown as ChatResponse).knowledgeGapId!;
   const triage = await request(`/knowledge-gaps/${gapId}/triage`, 'PATCH', { priority: 'HIGH' });
   assert.equal(triage.response.status, 200);
-  assert.equal((await request(`/knowledge-gaps/${gapId}/transition`, 'POST', { fromStatus: 'DETECTED', toStatus: 'TRIAGED' })).response.status, 200);
+  assert.equal((await request(`/knowledge-gaps/${gapId}/transition`, 'POST', { fromStatus: 'DETECTED', toStatus: 'TRIAGED' })).response.status, 409);
+  assert.equal((await request(`/knowledge-gaps/${gapId}/review/decision`, 'POST', { revision: repository.getReview(gapId).review.revision, decision: 'ACCEPT', actor: 'Revisor sintético' })).response.status, 200);
+  assert.equal((await request(`/knowledge-gaps/${gapId}/review`, 'PATCH', metadataFor(repository, gapId))).response.status, 200);
+  assert.equal((await request(`/knowledge-gaps/${gapId}/review/classify`, 'POST', { revision: repository.getReview(gapId).review.revision, actor: 'Clasificador sintético' })).response.status, 200);
   const detail = await (await fetch(`${base}/knowledge-gaps/${gapId}`)).json() as KnowledgeGapDetail;
   const actionId = detail.suggestedActions[0]!.id;
   assert.equal((await request(`/knowledge-gaps/${gapId}/transition`, 'POST', { fromStatus: 'TRIAGED', toStatus: 'ACTION_PROPOSED', selectedActionId: actionId })).response.status, 200);
@@ -218,7 +222,7 @@ test('narrow writes preserve state; explicit transitions enforce evidence, fresh
   operations.triage(gapId, { priority: 'HIGH' });
   assert.equal(repository.getGap(gapId)!.status, 'DETECTED');
   assert.throws(() => operations.addEvidence(gapId, { content: evidenceText, origin: 'Synthetic' }), domainCode('INVALID_TRANSITION'));
-  operations.transition(gapId, { fromStatus: 'DETECTED', toStatus: 'TRIAGED' });
+  acceptAndClassify(repository, gapId);
   operations.transition(gapId, { fromStatus: 'TRIAGED', toStatus: 'ACTION_PROPOSED' });
   const action = repository.getGap(gapId)!.suggestedActions[0]!;
   assert.throws(() => operations.transition(gapId, { fromStatus: 'ACTION_PROPOSED', toStatus: 'IN_PROGRESS', selectedActionId: action.id }), domainCode('APPROVAL_REQUIRED'));
@@ -413,7 +417,7 @@ test('malformed provider shapes fail cleanly and unusable proposals become a lab
   assert.equal(gap.suggestedActions.length, 1);
   assert.equal(gap.suggestedActions[0]!.type, 'REQUEST_INFORMATION');
   assert.match(gap.suggestedActions[0]!.description, /determinista de respaldo/);
-  operations.transition(gap.id, { fromStatus: 'DETECTED', toStatus: 'TRIAGED' });
+  acceptAndClassify(repository, gap.id);
   operations.transition(gap.id, { fromStatus: 'TRIAGED', toStatus: 'ACTION_PROPOSED' });
 });
 

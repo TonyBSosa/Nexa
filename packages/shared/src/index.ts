@@ -19,3 +19,4 @@ export type {
 } from './chat.js';
 
 export type { DashboardSummary, AnalyticsSummary } from './analytics.js';
+export type { GapReview, ReviewDetail, ReviewEvent, ReviewMetadata, ReviewDecisionRequest, ReviewDecision, ReviewDisposition, ReviewList, ReviewFilters, SensitivityLevel } from './review.js';
