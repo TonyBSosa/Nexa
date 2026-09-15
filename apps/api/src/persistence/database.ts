@@ -8,7 +8,9 @@ export function openDatabase(path: string): Database.Database {
   try {
     db.pragma('foreign_keys = ON');
     const version = db.pragma('user_version', { simple: true });
-    if (version !== 0 && version !== 1 && version !== 2 && version !== 3) throw new Error('Unsupported database schema version.');
+    if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4) {
+      throw new Error('Unsupported database schema version.');
+    }
     if (version === 0) db.transaction(() => {
       db.exec(`
         CREATE TABLE knowledge_gaps (
@@ -87,7 +89,16 @@ export function openDatabase(path: string): Database.Database {
           approvedDraftRevision INTEGER NOT NULL CHECK (approvedDraftRevision > 0),
           publishedAt TEXT NOT NULL
         );
-        PRAGMA user_version = 3;
+        CREATE TABLE recovery_activity (
+          id TEXT PRIMARY KEY,
+          knowledgeGapId TEXT NOT NULL REFERENCES knowledge_gaps(id),
+          type TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          detail TEXT,
+          createdAt TEXT NOT NULL
+        );
+        CREATE INDEX recovery_activity_by_gap ON recovery_activity(knowledgeGapId, createdAt);
+        PRAGMA user_version = 4;
       `);
     })();
     if (version === 1) db.transaction(() => {
@@ -144,6 +155,20 @@ export function openDatabase(path: string): Database.Database {
           publishedAt TEXT NOT NULL
         );
         PRAGMA user_version = 3;
+      `);
+    })();
+    if (version === 1 || version === 2 || version === 3) db.transaction(() => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS recovery_activity (
+          id TEXT PRIMARY KEY,
+          knowledgeGapId TEXT NOT NULL REFERENCES knowledge_gaps(id),
+          type TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          detail TEXT,
+          createdAt TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS recovery_activity_by_gap ON recovery_activity(knowledgeGapId, createdAt);
+        PRAGMA user_version = 4;
       `);
     })();
     return db;

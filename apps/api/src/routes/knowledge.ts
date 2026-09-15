@@ -29,6 +29,18 @@ export function createKnowledgeRouter(repository: KnowledgeRepository, operation
   router.post('/knowledge-gaps/:id/transition', (request, response, next) => {
     try { response.json(operations.transition(request.params.id, request.body)); } catch (error) { next(error); }
   });
+  router.patch('/knowledge-gaps/:id/action', (request, response, next) => {
+    try { response.json(operations.updateAction(request.params.id, request.body)); } catch (error) { next(error); }
+  });
+  router.post('/knowledge-gaps/:id/actions', (request, response, next) => {
+    try { response.status(201).json(operations.createManualAction(request.params.id, request.body)); } catch (error) { next(error); }
+  });
+  router.post('/knowledge-gaps/:id/actions/:actionId/discard', (request, response, next) => {
+    try { response.json(operations.discardAction(request.params.id, request.params.actionId)); } catch (error) { next(error); }
+  });
+  router.post('/knowledge-gaps/:id/activity', (request, response, next) => {
+    try { response.status(201).json(operations.addActivity(request.params.id, request.body)); } catch (error) { next(error); }
+  });
   router.post('/knowledge-gaps/:id/evidence', (request, response, next) => {
     try { response.status(201).json(operations.addEvidence(request.params.id, request.body)); } catch (error) { next(error); }
   });

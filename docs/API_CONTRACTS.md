@@ -155,9 +155,27 @@ Purpose: advance an administrator-controlled workflow step using GapTransitionRe
 {"id":"gap-1","status":"IN_PROGRESS","updatedAt":"2026-09-06T15:02:00Z"}
 ```
 
-Allowed forward steps: DETECTED → TRIAGED → ACTION_PROPOSED → IN_PROGRESS → KNOWLEDGE_COLLECTED → AWAITING_APPROVAL; PUBLISHED → RESOLVED. TRIAGED records human review. Evidence is required for KNOWLEDGE_COLLECTED. AWAITING_APPROVAL requires a saved draft whose evidenceRevisionUsed equals the gap's current version and whose revision is newer than any rejected/change-requested revision. ACTION_PROPOSED requires a usable proposal (deterministic REQUEST_INFORMATION fallback if AI provides none). Only approval can enter PUBLISHED or return a reviewed draft to KNOWLEDGE_COLLECTED. RESOLVED requires explicit human closure after local publication. Response is a mutation receipt; reload detail for full state.
+Allowed forward steps: DETECTED → TRIAGED → ACTION_PROPOSED → IN_PROGRESS → KNOWLEDGE_COLLECTED → AWAITING_APPROVAL; PUBLISHED → RESOLVED. Additionally, IN_PROGRESS → ACTION_PROPOSED is allowed when a nonempty `humanNote` justifies changing the recovery strategy. TRIAGED records human review. Evidence is required for KNOWLEDGE_COLLECTED. AWAITING_APPROVAL requires a saved draft whose evidenceRevisionUsed equals the gap's current version and whose revision is newer than any rejected/change-requested revision. ACTION_PROPOSED requires a usable proposal (deterministic REQUEST_INFORMATION fallback if AI provides none). Entering IN_PROGRESS requires a selected action with responsible, recipient, objective, and dueAt, plus `approveSimulatedAction: true`. Only approval can enter PUBLISHED or return a reviewed draft to KNOWLEDGE_COLLECTED. RESOLVED requires explicit human closure after local publication. Response is a mutation receipt; reload detail for full state.
 
 Errors: INVALID_REQUEST, NOT_FOUND, STALE_STATE, INVALID_TRANSITION, APPROVAL_REQUIRED, PERSISTENCE_ERROR. No arbitrary status jump or real external action is permitted.
+
+## PATCH /api/knowledge-gaps/:id/action
+
+Purpose: edit a recovery action during TRIAGED, ACTION_PROPOSED, or IN_PROGRESS. Request requires `actionId` and may include recipient, subject, description, objective, dueAt, notes, agenda, meetingLink, meetingAt, participants, externalTaskReference, responsible, executionStatus (`PENDING` | `SENT` | `WAITING_RESPONSE` | `RESPONDED` | `COMPLETED` | `CANCELLED`), sentAt, respondedAt, responseAttachment, cancelReason, preparedEmailBody, reminderNote, humanNote. Cancelled status requires cancelReason. Returns KnowledgeGapDetail. External systems are never invoked.
+
+## POST /api/knowledge-gaps/:id/actions
+
+Purpose: create a manual recovery action during TRIAGED or ACTION_PROPOSED. Request: `type`, `description`, and optional recipient/subject/objective/dueAt/notes/agenda/responsible. Returns KnowledgeGapDetail (201).
+
+## POST /api/knowledge-gaps/:id/actions/:actionId/discard
+
+Purpose: discard a suggestion during TRIAGED or ACTION_PROPOSED while leaving at least one usable action. Returns KnowledgeGapDetail.
+
+## POST /api/knowledge-gaps/:id/activity
+
+Purpose: append a timeline note or reminder during ACTION_PROPOSED, IN_PROGRESS, or KNOWLEDGE_COLLECTED. Request: `summary`, optional `detail`, optional `type` (`NOTE` | `REMINDER`). Returns ActivityEvent (201).
+
+KnowledgeGapDetail additionally exposes `contacts` (synthetic directory people with name, title, department, email, phone, availability), `activity` (newest first), and `missingInformation` (clear statement of what still needs recovery). RecoveryAction also carries the editable proposal/tracking fields above; `simulated` remains true and Outlook/Gmail/Zoom automation is out of MVP scope.
 
 ## POST /api/knowledge-gaps/:id/evidence
 
