@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
+import type { ReviewDetail, ReviewMetadata, ReviewDecisionRequest, ReviewFilters, ReviewList } from '@nexa/shared';
+import { ReviewStore } from './review.js';
 import type {
   ActivityEvent, ActivityEventType, AddActivityRequest, AddEvidenceRequest, Approval, ApprovalRequest,
   ApprovalResult, ApprovedKnowledgeArticle, ChatResponse, CollectedEvidence, CreateManualActionRequest,
@@ -23,6 +25,11 @@ export class PersistenceError extends Error {
 }
 
 export interface KnowledgeRepository {
+  getReview(id: string): ReviewDetail;
+  listReviews(filters: ReviewFilters): ReviewList;
+  saveReview(id: string, metadata: ReviewMetadata): ReviewDetail;
+  decideReview(id: string, request: ReviewDecisionRequest): ReviewDetail;
+  confirmReview(id: string, revision: number, actor: string): ReviewDetail;
   record(message: string, response: ChatResponse, gapEligible: boolean, clientSessionId?: string): Query;
   listQueries(): Query[];
   listGaps(status?: KnowledgeGapStatus): KnowledgeGap[];
@@ -74,6 +81,19 @@ function gapFromRow(row: GapRow): KnowledgeGap {
 
 export class SQLiteKnowledgeRepository implements KnowledgeRepository {
   constructor(private readonly db: Database.Database, private readonly now: () => Date = () => new Date()) {}
+
+  private get reviews() { return new ReviewStore(this.db, this.now); }
+  getReview(id: string): ReviewDetail { return this.guard(() => this.reviews.detail(id)); }
+  saveReview(id: string, metadata: ReviewMetadata): ReviewDetail { return this.guard(() => this.reviews.save(id, metadata)); }
+  decideReview(id: string, request: ReviewDecisionRequest): ReviewDetail { return this.guard(() => this.reviews.decide(id, request)); }
+  confirmReview(id: string, revision: number, actor: string): ReviewDetail { return this.guard(() => this.reviews.confirm(id, revision, actor)); }
+  listReviews(filters: ReviewFilters): ReviewList {
+    return this.guard(() => this.db.transaction(() => {
+      const result = this.reviews.list(filters);
+      return { items: result.ids.map(id => ({ ...gapFromRow(this.gapRow(id)), reviewDisposition: this.reviews.state(id).disposition })),
+        total: result.total, page: filters.page, pageSize: filters.pageSize };
+    })());
+  }
 
   private guard<T>(operation: () => T): T {
     try { return operation(); } catch (error) {
@@ -223,6 +243,7 @@ export class SQLiteKnowledgeRepository implements KnowledgeRepository {
     return this.guard(() => this.db.transaction(() => {
       const row = this.gapRow(id);
       assertTriageAllowed(row.status);
+      this.reviews.invalidateClassification(id);
       const now = this.now().toISOString();
       this.db.prepare(`UPDATE knowledge_gaps SET priority = ?, category = ?,
         suggestedDepartment = ?, suggestedExperts = ?, updatedAt = ? WHERE id = ?`).run(
@@ -241,6 +262,7 @@ export class SQLiteKnowledgeRepository implements KnowledgeRepository {
       const row = this.gapRow(id);
       requireStatus(row.status, request.fromStatus);
       assertOperationTransition(request.fromStatus, request.toStatus);
+      this.reviews.guardTransition(id, request.toStatus);
       const now = this.now().toISOString();
       let selectedAction = row.selectedAction;
       const gap = gapFromRow(row);

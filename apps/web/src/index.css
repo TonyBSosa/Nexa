@@ -12,3 +12,22 @@
 @media(max-width:470px){.metric-grid,.metric-grid.four{grid-template-columns:1fr}.topbar-actions>svg{display:none}.page-header h1{font-size:1.45rem}.flow{overflow-x:auto;gap:20px}.flow-step{min-width:62px}}
 .messages{min-height:360px;max-height:52vh}
 @media(max-width:760px){.messages{min-height:340px}}
+/* Detection and classification reuse the portal's cards and controls. */
+.review-panel { width: 100%; border-top: 1px solid #e5eaf3; padding-top: 20px; display: grid; gap: 16px; }
+.operations-layout .primary-cell .text-button { white-space: normal; text-align: left; overflow-wrap: anywhere; }
+.review-fields, .review-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 16px; border: 1px solid #e5eaf3; border-radius: 8px; }
+.review-filters { margin: 0 20px 16px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.review-panel label, .review-filters label { display: grid; gap: 6px; font-size: 13px; color: #42516b; }
+.review-panel input, .review-panel select, .review-panel textarea, .review-filters input, .review-filters select { min-width: 0; width: 100%; border: 1px solid #cdd5e3; border-radius: 6px; padding: 9px; background: white; color: #1b2e4b; font: inherit; }
+.review-panel textarea { min-height: 84px; resize: vertical; }
+.review-panel input:focus-visible, .review-panel select:focus-visible, .review-panel textarea:focus-visible, .review-filters input:focus-visible, .review-filters select:focus-visible { outline: 2px solid #5579da; outline-offset: 2px; }
+.review-relations { display: grid; gap: 10px; max-height: 220px; overflow: auto; }
+.review-relations label { display: flex; align-items: center; }
+.review-relations input { width: auto; }
+.review-search, .review-pagination { display: flex; align-items: end; gap: 16px; flex-wrap: wrap; }
+.review-pagination { align-items: center; justify-content: end; padding: 16px; }
+.review-search label { flex: 1; min-width: 180px; }
+.review-warning { padding: 12px; border: 1px solid #e7bb60; border-radius: 6px; background: #fff8e8; color: #76551d; }
+.review-panel details article { padding: 12px 0; border-bottom: 1px solid #e5eaf3; }
+@media (max-width: 850px) { .review-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .review-fields, .review-filters { grid-template-columns: 1fr; } }

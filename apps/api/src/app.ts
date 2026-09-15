@@ -1,4 +1,5 @@
 import express from 'express';
+import { createReviewRouter } from './routes/review.js';
 import { createAnalyticsRouter } from './routes/analytics.js';
 import type { ErrorRequestHandler } from 'express';
 import { healthRouter } from './routes/health.js';
@@ -16,6 +17,7 @@ export function createApp(provider: AgentProvider, repository: KnowledgeReposito
   app.disable('x-powered-by');
   app.use(express.json({ limit: '16kb' }));
   app.use('/api', healthRouter);
+  app.use('/api', createReviewRouter(repository));
   app.use('/api', createAnalyticsRouter(repository));
   app.use('/api', createChatRouter(new ChatService(provider, repository)));
   app.use('/api', createKnowledgeRouter(repository, new KnowledgeOperationsService(provider, repository)));

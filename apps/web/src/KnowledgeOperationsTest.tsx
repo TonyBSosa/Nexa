@@ -7,6 +7,7 @@ import {
   AlertCircle, Check, ClipboardList, Copy, FileText, Mail,
   Phone, RefreshCw, Trash2, UserRound, Workflow,
 } from 'lucide-react';
+import { GapReviewPanel } from './GapReviewPanel';
 
 const lifecycle: Array<[KnowledgeGapStatus, string]> = [
   ['DETECTED', 'Detectado'], ['TRIAGED', 'Clasificado'], ['ACTION_PROPOSED', 'Acción propuesta'],
@@ -83,14 +84,23 @@ export function KnowledgeOperationsTest({ initialGapId = '' }: { initialGapId?: 
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [copyNotice, setCopyNotice] = useState('');
+  const [filters, setFilters] = useState({ q: '', disposition: '', priority: '', department: '', from: '', to: '', status: '' });
+  const [appliedFilters, setAppliedFilters] = useState(filters);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [dispositions, setDispositions] = useState<Record<string, string>>({});
 
   const loadList = useCallback(async (preferredId?: string) => {
-    const response = await fetch('/api/knowledge-gaps');
-    const body = await response.json() as { items?: KnowledgeGap[]; error?: { message?: string } };
+    const params = new URLSearchParams({ page: String(page), pageSize: '10' });
+    for (const [key, value] of Object.entries(appliedFilters)) if (value) params.set(key, value);
+    const response = await fetch('/api/knowledge-reviews?' + params);
+    const body = await response.json() as { items?: Array<KnowledgeGap & { reviewDisposition: string }>; total?: number; error?: { message?: string } };
     if (!response.ok || !body.items) throw new Error(body.error?.message ?? 'No se pudieron cargar las brechas.');
     setGaps(body.items);
+    setTotal(body.total ?? 0);
+    setDispositions(Object.fromEntries(body.items.map(item => [item.id, item.reviewDisposition])));
     setSelectedId(current => preferredId ?? (current || body.items?.[0]?.id || ''));
-  }, []);
+  }, [page, appliedFilters]);
 
   const loadDetail = useCallback(async (id: string) => {
     if (!id) { setGap(null); return; }
@@ -218,25 +228,38 @@ export function KnowledgeOperationsTest({ initialGapId = '' }: { initialGapId?: 
         <div className="operations-heading">
           <div>
             <h2>Brechas de conocimiento</h2>
-            <p>Preguntas que todavía no cuentan con una respuesta aprobada.</p>
+            <p>Revisa solicitudes detectadas, clasifica las aceptadas y gestiona la recuperación.</p>
           </div>
-          <button className="icon-button" onClick={() => void refresh()} disabled={busy} aria-label="Actualizar brechas">
+          <button className="icon-button" onClick={() => { setBusy(true); setError(''); void refresh().catch(reason => setError(reason instanceof Error ? reason.message : 'Error al actualizar.')).finally(() => setBusy(false)); }} disabled={busy} aria-label="Actualizar brechas">
             <RefreshCw size={16} />
           </button>
         </div>
+        <form className="review-filters" onSubmit={event => { event.preventDefault(); setError(''); setPage(1); setAppliedFilters({ ...filters }); }}>
+          <label>Buscar por texto<input value={filters.q} onChange={event => setFilters({ ...filters, q: event.target.value })} /></label>
+          <label>Revisión<select value={filters.disposition} onChange={event => setFilters({ ...filters, disposition: event.target.value })}><option value="">Todas</option><option value="PENDING">Pendientes de revisión</option><option value="ACCEPTED">Aceptadas</option><option value="DISCARDED">Descartadas</option><option value="DUPLICATE">Duplicadas</option></select></label>
+          <label>Prioridad<select value={filters.priority} onChange={event => setFilters({ ...filters, priority: event.target.value })}><option value="">Todas</option><option value="LOW">Baja</option><option value="MEDIUM">Media</option><option value="HIGH">Alta</option></select></label>
+          <label>Departamento<input value={filters.department} onChange={event => setFilters({ ...filters, department: event.target.value })} placeholder="Nombre exacto" /></label>
+          <label>Desde<input type="date" value={filters.from} onChange={event => setFilters({ ...filters, from: event.target.value })} /></label>
+          <label>Hasta<input type="date" value={filters.to} onChange={event => setFilters({ ...filters, to: event.target.value })} /></label>
+          <label>Estado<select value={filters.status} onChange={event => setFilters({ ...filters, status: event.target.value })}><option value="">Todos</option>{lifecycle.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+          <button className="button secondary" disabled={busy}>Aplicar filtros</button>
+        </form>
         {error && <div className="inline-error" role="alert"><AlertCircle size={16} />{error}</div>}
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Brecha</th><th>Estado</th><th>Ocurrencias</th><th>Prioridad</th><th>Departamento</th>
+                <th>Brecha</th><th>Estado / revisión</th><th>Ocurrencias</th><th>Prioridad</th><th>Departamento</th>
               </tr>
             </thead>
             <tbody>
               {gaps.map(item => (
-                <tr key={item.id} className={selectedId === item.id ? 'row-selected' : ''} onClick={() => setSelectedId(item.id)}>
-                  <td className="primary-cell">{item.title}</td>
-                  <td><span className={`badge badge-${tone(item.status)}`}>{statusLabel[item.status]}</span></td>
+                <tr key={item.id} className={selectedId === item.id ? 'row-selected' : ''}>
+                  <td className="primary-cell"><button className="text-button" disabled={busy} onClick={() => setSelectedId(item.id)}>{item.title}</button></td>
+                  <td>
+                    <span className={`badge badge-${tone(item.status)}`}>{statusLabel[item.status]}</span>
+                    {dispositions[item.id] === 'DISCARDED' ? ' · Descartada' : dispositions[item.id] === 'DUPLICATE' ? ' · Duplicada' : dispositions[item.id] === 'PENDING' ? ' · Pendiente de revisión' : ''}
+                  </td>
                   <td>{item.occurrences}</td>
                   <td>{item.priority}</td>
                   <td>{item.suggestedDepartment ?? 'Sin asignar'}</td>
@@ -245,12 +268,17 @@ export function KnowledgeOperationsTest({ initialGapId = '' }: { initialGapId?: 
               {!gaps.length && (
                 <tr>
                   <td className="empty-cell" colSpan={5}>
-                    {busy ? 'Cargando brechas…' : 'No hay brechas. Crea una consulta insuficiente desde el Asistente IA.'}
+                    {busy ? 'Cargando brechas…' : error ? 'No se pudo cargar el listado.' : 'No hay solicitudes que coincidan con los filtros.'}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+        </div>
+        <div className="review-pagination">
+          <button className="button secondary" disabled={busy || page <= 1} onClick={() => setPage(value => value - 1)}>Anterior</button>
+          <span aria-live="polite">Página {page} · {total} solicitudes</span>
+          <button className="button secondary" disabled={busy || page * 10 >= total} onClick={() => setPage(value => value + 1)}>Siguiente</button>
         </div>
       </section>
 
@@ -506,12 +534,7 @@ export function KnowledgeOperationsTest({ initialGapId = '' }: { initialGapId?: 
           )}
 
           <div className="workflow-controls">
-            {gap.status === 'DETECTED' && (
-              <>
-                <button className="button secondary" disabled={busy} onClick={() => void run('/triage', 'PATCH', { priority: 'HIGH', category: gap.category ?? 'Sin clasificar' })}>Guardar clasificación</button>
-                <button className="button primary" disabled={busy} onClick={() => void run('/transition', 'POST', { fromStatus: 'DETECTED', toStatus: 'TRIAGED' })}>Confirmar clasificación</button>
-              </>
-            )}
+            <GapReviewPanel gap={gap} refresh={() => refresh(gap.id)} />
             {gap.status === 'TRIAGED' && action && (
               <button
                 className="button primary"

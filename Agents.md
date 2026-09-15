@@ -18,6 +18,8 @@ DETECTED → TRIAGED → ACTION_PROPOSED → IN_PROGRESS → KNOWLEDGE_COLLECTED
 
 Keep workflow rules in the backend. Publication requires human validation and approval.
 
+Detection/classification review extends this lifecycle without adding stages: discard and duplicate are separate review dispositions. Explicit human acceptance enters TRIAGED; reviewed classification with category, department and responsible person is required before ACTION_PROPOSED. A human may return TRIAGED to DETECTED for review. Discarded/duplicate requests remain stored and can be restored. Reviewer names are declared MVP metadata, not authenticated identities.
+
 ## AI Behavior and Human Approval
 
 - Never invent internal company knowledge when sources are insufficient. Explicitly surface missing knowledge as a knowledge gap.
