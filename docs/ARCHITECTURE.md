@@ -122,7 +122,7 @@ PUBLISHED requires a committed approved article revision accessible to this quer
 | DETECTED | Gap created. |
 | TRIAGED | Human reviewed/classified the gap; narrow triage updates do not themselves change state. |
 | ACTION_PROPOSED | At least one usable recovery proposal exists, including the deterministic fallback when needed. |
-| IN_PROGRESS | A human-approved recovery action is being followed (simulated externally). |
+| IN_PROGRESS | A human-approved recovery action is being followed (simulated externally). May return to ACTION_PROPOSED with an explicit human justification when the strategy must change. |
 | KNOWLEDGE_COLLECTED | New information/evidence is recorded. |
 | AWAITING_APPROVAL | A current, fresh draft revision awaits human review. |
 | PUBLISHED | Approved current article revision is immediately available to NEXA retrieval. |
