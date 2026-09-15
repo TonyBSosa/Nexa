@@ -28,7 +28,7 @@ export interface DraftRevisionDiff {
 // Bounds the LCS table (about 16 MB) so oversized inputs degrade to a full replacement.
 const maxComparisonCells = 4_000_000;
 
-function splitLines(text: string): string[] {
+export function splitLines(text: string): string[] {
   const normalized = text.replace(/\r\n?/g, '\n');
   if (!normalized) return [];
   const lines = normalized.split('\n');
