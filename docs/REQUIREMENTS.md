@@ -37,6 +37,18 @@ Actors are conceptual UI/product modes. Authentication and authorization are not
 
 # Non-Functional Requirements
 
+## Detection and classification extension
+
+- FR-022: Detection shows original question, creation date, occurrences, origin, lifecycle status, priority and suggested department; title, category, priority and department can be edited.
+- FR-023: Require an identified (declared) human decision to accept into TRIAGED, discard for not applicable/sensitive/improper with justification, or mark duplicate with another valid target. Preserve records and decision history; allow restoration to pending review.
+- FR-024: Provide server-side text search, pagination and filters for pending/discarded/duplicate review, priority, department, creation date and lifecycle status.
+- FR-025: Show advisory sensitivity warnings without claiming complete sensitive-data detection.
+- FR-026: Classification edits category, department, priority, primary responsible person, suggested experts, sensitivity, target date and importance. Confirmation requires category, department, responsible person and importance and records who/when. Display a summary before confirmation.
+- FR-027: Suggest similar gaps, allow links to existing gaps and approved articles, and permit explicit return from TRIAGED to DETECTED. Relationships do not merge records or confer approval.
+- FR-028: Require fresh confirmed classification before ACTION_PROPOSED; invalidate confirmation on metadata edits. Preserve the eight lifecycle statuses and all later evidence/publication controls.
+
+These requirements extend the original narrow triage and forward-only review model; see ADR-027 and the review endpoints in API_CONTRACTS.md.
+
 Dashboard, Analytics, and Knowledge Health reuse shared backend aggregation logic. LEARN means reusable knowledge and updated indicators, not training. Frontend development uses mocked DTOs; backend can use FakeAgentProvider independently of Botpress.
 
 | ID | Requirement |

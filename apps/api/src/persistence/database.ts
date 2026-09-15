@@ -8,7 +8,7 @@ export function openDatabase(path: string): Database.Database {
   try {
     db.pragma('foreign_keys = ON');
     const version = db.pragma('user_version', { simple: true });
-    if (version !== 0 && version !== 1 && version !== 2 && version !== 3) throw new Error('Unsupported database schema version.');
+    if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4) throw new Error('Unsupported database schema version.');
     if (version === 0) db.transaction(() => {
       db.exec(`
         CREATE TABLE knowledge_gaps (
@@ -144,6 +144,25 @@ export function openDatabase(path: string): Database.Database {
           publishedAt TEXT NOT NULL
         );
         PRAGMA user_version = 3;
+      `);
+    })();
+    if (version !== 4) db.transaction(() => {
+      db.exec(`
+        CREATE TABLE gap_reviews (
+          knowledgeGapId TEXT PRIMARY KEY REFERENCES knowledge_gaps(id),
+          data TEXT NOT NULL CHECK (json_valid(data))
+        );
+        CREATE TABLE gap_review_events (
+          id INTEGER PRIMARY KEY,
+          knowledgeGapId TEXT NOT NULL REFERENCES knowledge_gaps(id),
+          action TEXT NOT NULL,
+          actor TEXT NOT NULL,
+          reason TEXT,
+          snapshot TEXT NOT NULL CHECK (json_valid(snapshot)),
+          createdAt TEXT NOT NULL
+        );
+        CREATE INDEX review_events_by_gap ON gap_review_events(knowledgeGapId, id);
+        PRAGMA user_version = 4;
       `);
     })();
     return db;

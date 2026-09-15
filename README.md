@@ -93,7 +93,7 @@ Matching lowercases, removes accents, normalizes punctuation (including Spanish 
 
 The Knowledge Operations page opens gaps created from organizational questions and supports the following controlled lifecycle:
 
-1. Save triage metadata (state stays DETECTED), then explicitly confirm review (`DETECTED → TRIAGED`).
+1. In Knowledge Operations, edit the detected request and save its metadata. Enter a declared reviewer and accept it for classification (`DETECTED → TRIAGED`). In Clasificado, fill category, department, responsible person and importance, save, inspect the summary and confirm classification. Continue to Acción propuesta. Discard and duplicate are separate review decisions with restoration and history; use only synthetic examples.
 2. Select a proposed action, then explicitly approve starting it (`ACTION_PROPOSED → IN_PROGRESS`). The action is simulated; no email, meeting, document request, or external task is executed.
 3. Add verified evidence manually (state stays IN_PROGRESS), explicitly confirm KNOWLEDGE_COLLECTED, and generate a versioned draft (state stays KNOWLEDGE_COLLECTED). Inspect it and explicitly submit AWAITING_APPROVAL. Draft generation uses only the supplied evidence.
 4. Approve the current fresh revision. Approval, local article publication, and `PUBLISHED` commit atomically. Changes requested or rejection return the gap to `KNOWLEDGE_COLLECTED` and require a newer draft.
