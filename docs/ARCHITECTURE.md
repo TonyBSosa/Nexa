@@ -122,7 +122,7 @@ PUBLISHED requires a committed approved article revision accessible to this quer
 | DETECTED | Gap created. |
 | TRIAGED | Human reviewed/classified the gap; narrow triage updates do not themselves change state. |
 | ACTION_PROPOSED | At least one usable recovery proposal exists, including the deterministic fallback when needed. |
-| IN_PROGRESS | A human-approved recovery action is being followed (simulated externally). |
+| IN_PROGRESS | A human-approved recovery action is being followed (simulated externally). May return to ACTION_PROPOSED with an explicit human justification when the strategy must change. |
 | KNOWLEDGE_COLLECTED | New information/evidence is recorded. |
 | AWAITING_APPROVAL | A current, fresh draft revision awaits human review. |
 | PUBLISHED | Approved current article revision is immediately available to NEXA retrieval. |
@@ -134,7 +134,7 @@ APPROVED authorizes only the current draft revision; successful publication then
 
 # Error and Fallback Behavior
 
-Detection/classification uses schema v4: `gap_reviews` stores versioned review metadata and `gap_review_events` stores append-only decision snapshots. PENDING/ACCEPTED/DISCARDED/DUPLICATE are review dispositions, separate from lifecycle status. Discards require reasons; restoration returns to pending review without deleting records. Duplicate marking links to another valid request without merging queries or occurrences. Related gaps/articles are references only and never evidence or publication. Existing normalization, eligibility and demand counting remain unchanged: repeated eligible questions can increment a discarded/duplicate record without reopening it. Existing analytics remain lifecycle/demand indicators and include these preserved records; the review queue supplies separate disposition filters.
+Detection/classification and recovery tracking use schema v5: `gap_reviews` stores versioned review metadata, `gap_review_events` stores append-only decision snapshots, and `recovery_activity` stores the in-progress timeline. Version 4 collided between those features; opening v3 or v4 creates any missing tables. PENDING/ACCEPTED/DISCARDED/DUPLICATE are review dispositions, separate from lifecycle status. Discards require reasons; restoration returns to pending review without deleting records. Duplicate marking links to another valid request without merging queries or occurrences. Related gaps/articles are references only and never evidence or publication. Existing normalization, eligibility and demand counting remain unchanged: repeated eligible questions can increment a discarded/duplicate record without reopening it. Existing analytics remain lifecycle/demand indicators and include these preserved records; the review queue supplies separate disposition filters.
 
 Review decisions and metadata writes use immediate SQLite transactions and a revision guard. Existing TRIAGED records require classification before advancing; later stages retain their state and no reviewer identity is fabricated by migration. Sensitivity warnings use a small explicit keyword heuristic; similar-gap suggestions use shared words, not semantic inference. Both require human judgment. Names and roles are declared demo metadata, not verified identities or access controls.
 

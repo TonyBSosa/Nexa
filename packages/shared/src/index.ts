@@ -3,13 +3,20 @@ export interface HealthResponse {
   service: 'nexa-api';
 }
 
-export { knowledgeGapStatuses } from './knowledge.js';
+export {
+  knowledgeGapStatuses,
+  recoveryActionExecutionStatuses,
+  contactAvailabilities,
+  activityEventTypes,
+} from './knowledge.js';
 export type {
   Query, KnowledgeGap, KnowledgeGapDetail, KnowledgeGapStatus, KnowledgeGapPriority,
-  RecoveryAction, CollectedEvidence, KnowledgeDraft, Approval, ApprovalDecision,
+  RecoveryAction, RecoveryActionExecutionStatus, ContactPerson, ContactAvailability,
+  ActivityEvent, ActivityEventType, CollectedEvidence, KnowledgeDraft, Approval, ApprovalDecision,
   ApprovedKnowledgeArticle, PublishedArticleReference, TriageUpdateRequest,
   GapTransitionRequest, AddEvidenceRequest, GenerateDraftRequest, ApprovalRequest,
   ApprovalResult, DraftGenerationInput, DraftGenerationResult,
+  UpdateRecoveryActionRequest, CreateManualActionRequest, AddActivityRequest,
 } from './knowledge.js';
 
 export type {

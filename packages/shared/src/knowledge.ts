@@ -8,6 +8,41 @@ export type KnowledgeGapStatus = typeof knowledgeGapStatuses[number];
 export type KnowledgeGapPriority = 'LOW' | 'MEDIUM' | 'HIGH';
 export type ApprovalDecision = 'APPROVED' | 'CHANGES_REQUESTED' | 'REJECTED';
 
+export const recoveryActionExecutionStatuses = [
+  'PENDING', 'SENT', 'WAITING_RESPONSE', 'RESPONDED', 'COMPLETED', 'CANCELLED',
+] as const;
+export type RecoveryActionExecutionStatus = typeof recoveryActionExecutionStatuses[number];
+
+export const contactAvailabilities = ['AVAILABLE', 'BUSY', 'AWAY', 'UNKNOWN'] as const;
+export type ContactAvailability = typeof contactAvailabilities[number];
+
+export interface ContactPerson {
+  id: string;
+  name: string;
+  title: string;
+  department: string;
+  email: string;
+  phone: string | null;
+  availability: ContactAvailability;
+}
+
+export const activityEventTypes = [
+  'NOTE', 'STATUS_CHANGE', 'RESPONSIBLE_CHANGE', 'DEADLINE_CHANGE',
+  'MEETING_UPDATE', 'REQUEST_UPDATE', 'REMINDER', 'CANCEL',
+  'STRATEGY_CHANGE', 'ACTION_CREATED', 'ACTION_DISCARDED', 'ACTION_APPROVED',
+  'ACTION_SELECTED', 'ACTION_UPDATED',
+] as const;
+export type ActivityEventType = typeof activityEventTypes[number];
+
+export interface ActivityEvent {
+  id: string;
+  knowledgeGapId: string;
+  type: ActivityEventType;
+  summary: string;
+  detail: string | null;
+  createdAt: string;
+}
+
 export interface RecoveryAction {
   id: string;
   type: SuggestedActionType;
@@ -17,6 +52,25 @@ export interface RecoveryAction {
   createdAt: string;
   updatedAt: string;
   approvedAt: string | null;
+  discarded: boolean;
+  recipient: string | null;
+  subject: string | null;
+  objective: string | null;
+  dueAt: string | null;
+  notes: string | null;
+  agenda: string | null;
+  meetingLink: string | null;
+  meetingAt: string | null;
+  participants: string[];
+  externalTaskReference: string | null;
+  responsible: string | null;
+  executionStatus: RecoveryActionExecutionStatus;
+  sentAt: string | null;
+  respondedAt: string | null;
+  responseAttachment: string | null;
+  cancelReason: string | null;
+  preparedEmailBody: string | null;
+  reminderNote: string | null;
 }
 
 export interface CollectedEvidence {
@@ -108,6 +162,9 @@ export interface KnowledgeGapDetail extends KnowledgeGap {
   currentDraft: KnowledgeDraft | null;
   approvals: Approval[];
   publishedArticle: ApprovedKnowledgeArticle | null;
+  contacts: ContactPerson[];
+  activity: ActivityEvent[];
+  missingInformation: string;
 }
 
 export interface TriageUpdateRequest {
@@ -156,3 +213,45 @@ export interface DraftGenerationInput {
 export type DraftGenerationResult =
   | { status: 'SUCCESS'; title: string; content: string }
   | { status: 'FAILURE' };
+
+export interface UpdateRecoveryActionRequest {
+  actionId: string;
+  recipient?: string | null;
+  subject?: string | null;
+  description?: string;
+  objective?: string | null;
+  dueAt?: string | null;
+  notes?: string | null;
+  agenda?: string | null;
+  meetingLink?: string | null;
+  meetingAt?: string | null;
+  participants?: string[];
+  externalTaskReference?: string | null;
+  responsible?: string | null;
+  executionStatus?: RecoveryActionExecutionStatus;
+  sentAt?: string | null;
+  respondedAt?: string | null;
+  responseAttachment?: string | null;
+  cancelReason?: string | null;
+  preparedEmailBody?: string | null;
+  reminderNote?: string | null;
+  humanNote?: string | null;
+}
+
+export interface CreateManualActionRequest {
+  type: SuggestedActionType;
+  description: string;
+  recipient?: string | null;
+  subject?: string | null;
+  objective?: string | null;
+  dueAt?: string | null;
+  notes?: string | null;
+  agenda?: string | null;
+  responsible?: string | null;
+}
+
+export interface AddActivityRequest {
+  summary: string;
+  detail?: string;
+  type?: 'NOTE' | 'REMINDER';
+}

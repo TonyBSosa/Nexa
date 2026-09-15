@@ -1,12 +1,15 @@
 import type {
-  AddEvidenceRequest, ApprovalRequest, ApprovalResult, GenerateDraftRequest, GapTransitionRequest,
-  KnowledgeDraft, KnowledgeGap, KnowledgeGapPriority, KnowledgeGapStatus, TriageUpdateRequest,
+  AddActivityRequest, AddEvidenceRequest, ApprovalRequest, ApprovalResult, CreateManualActionRequest,
+  GenerateDraftRequest, GapTransitionRequest, KnowledgeDraft, KnowledgeGap, KnowledgeGapPriority,
+  KnowledgeGapStatus, RecoveryActionExecutionStatus, SuggestedActionType, TriageUpdateRequest,
+  UpdateRecoveryActionRequest,
 } from '@nexa/shared';
-import { knowledgeGapStatuses } from '@nexa/shared';
+import { knowledgeGapStatuses, recoveryActionExecutionStatuses } from '@nexa/shared';
 import type { AgentProvider } from '../integrations/agent/AgentProvider.js';
 import { assertDraftAllowed, DomainError } from '../domain/workflow.js';
 import { validateDraft } from '../integrations/agent/validation.js';
 import type { KnowledgeRepository } from '../repositories/knowledge.js';
+import { optionalStringArray, optionalText, parseExecutionStatus } from '../domain/recoveryActions.js';
 
 function object(input: unknown, keys: string[]): Record<string, unknown> {
   if (typeof input !== 'object' || input === null || Array.isArray(input)
@@ -20,6 +23,16 @@ function text(value: unknown, name: string): string {
   if (typeof value !== 'string' || !value.trim()) throw new DomainError('INVALID_REQUEST', `${name} es obligatorio.`);
   return value.trim();
 }
+
+const actionTypes: SuggestedActionType[] = [
+  'REQUEST_INFORMATION', 'DRAFT_EMAIL', 'PROPOSE_MEETING', 'REQUEST_DOCUMENT', 'CREATE_DOCUMENTATION_TASK',
+];
+
+const actionUpdateKeys = [
+  'actionId', 'recipient', 'subject', 'description', 'objective', 'dueAt', 'notes', 'agenda',
+  'meetingLink', 'meetingAt', 'participants', 'externalTaskReference', 'responsible', 'executionStatus',
+  'sentAt', 'respondedAt', 'responseAttachment', 'cancelReason', 'preparedEmailBody', 'reminderNote', 'humanNote',
+];
 
 export class KnowledgeOperationsService {
   constructor(private readonly provider: AgentProvider, private readonly repository: KnowledgeRepository) {}
@@ -65,6 +78,143 @@ export class KnowledgeOperationsService {
       ...(typeof value.humanNote === 'string' && { humanNote: value.humanNote.trim() }),
     };
     return this.repository.transition(id, request);
+  }
+
+  updateAction(id: string, input: unknown) {
+    const value = object(input, actionUpdateKeys);
+    if (typeof value.actionId !== 'string' || !value.actionId.trim()) {
+      throw new DomainError('INVALID_REQUEST', 'actionId es obligatorio.');
+    }
+    let executionStatus: RecoveryActionExecutionStatus | undefined;
+    try {
+      executionStatus = parseExecutionStatus(value.executionStatus);
+    } catch {
+      throw new DomainError('INVALID_REQUEST', 'executionStatus no es válido.');
+    }
+    let participants: string[] | undefined;
+    let recipient: string | null | undefined;
+    let subject: string | null | undefined;
+    let objective: string | null | undefined;
+    let dueAt: string | null | undefined;
+    let notes: string | null | undefined;
+    let agenda: string | null | undefined;
+    let meetingLink: string | null | undefined;
+    let meetingAt: string | null | undefined;
+    let externalTaskReference: string | null | undefined;
+    let responsible: string | null | undefined;
+    let sentAt: string | null | undefined;
+    let respondedAt: string | null | undefined;
+    let responseAttachment: string | null | undefined;
+    let cancelReason: string | null | undefined;
+    let preparedEmailBody: string | null | undefined;
+    let reminderNote: string | null | undefined;
+    let humanNote: string | null | undefined;
+    try {
+      participants = optionalStringArray(value.participants);
+      recipient = optionalText(value.recipient);
+      subject = optionalText(value.subject);
+      objective = optionalText(value.objective);
+      dueAt = optionalText(value.dueAt);
+      notes = optionalText(value.notes);
+      agenda = optionalText(value.agenda);
+      meetingLink = optionalText(value.meetingLink);
+      meetingAt = optionalText(value.meetingAt);
+      externalTaskReference = optionalText(value.externalTaskReference);
+      responsible = optionalText(value.responsible);
+      sentAt = optionalText(value.sentAt);
+      respondedAt = optionalText(value.respondedAt);
+      responseAttachment = optionalText(value.responseAttachment);
+      cancelReason = optionalText(value.cancelReason);
+      preparedEmailBody = optionalText(value.preparedEmailBody);
+      reminderNote = optionalText(value.reminderNote);
+      humanNote = optionalText(value.humanNote);
+    } catch {
+      throw new DomainError('INVALID_REQUEST', 'Uno o más campos de la acción no son válidos.');
+    }
+    if (executionStatus && !(recoveryActionExecutionStatuses as readonly string[]).includes(executionStatus)) {
+      throw new DomainError('INVALID_REQUEST', 'executionStatus no es válido.');
+    }
+    const request: UpdateRecoveryActionRequest = {
+      actionId: value.actionId.trim(),
+      ...(value.description !== undefined && { description: text(value.description, 'description') }),
+      ...(recipient !== undefined && { recipient }),
+      ...(subject !== undefined && { subject }),
+      ...(objective !== undefined && { objective }),
+      ...(dueAt !== undefined && { dueAt }),
+      ...(notes !== undefined && { notes }),
+      ...(agenda !== undefined && { agenda }),
+      ...(meetingLink !== undefined && { meetingLink }),
+      ...(meetingAt !== undefined && { meetingAt }),
+      ...(participants !== undefined && { participants }),
+      ...(externalTaskReference !== undefined && { externalTaskReference }),
+      ...(responsible !== undefined && { responsible }),
+      ...(executionStatus !== undefined && { executionStatus }),
+      ...(sentAt !== undefined && { sentAt }),
+      ...(respondedAt !== undefined && { respondedAt }),
+      ...(responseAttachment !== undefined && { responseAttachment }),
+      ...(cancelReason !== undefined && { cancelReason }),
+      ...(preparedEmailBody !== undefined && { preparedEmailBody }),
+      ...(reminderNote !== undefined && { reminderNote }),
+      ...(humanNote !== undefined && { humanNote }),
+    };
+    return this.repository.updateAction(id, request);
+  }
+
+  createManualAction(id: string, input: unknown) {
+    const value = object(input, [
+      'type', 'description', 'recipient', 'subject', 'objective', 'dueAt', 'notes', 'agenda', 'responsible',
+    ]);
+    if (!actionTypes.includes(value.type as SuggestedActionType)) {
+      throw new DomainError('INVALID_REQUEST', 'type de acción no es válido.');
+    }
+    let recipient: string | null | undefined;
+    let subject: string | null | undefined;
+    let objective: string | null | undefined;
+    let dueAt: string | null | undefined;
+    let notes: string | null | undefined;
+    let agenda: string | null | undefined;
+    let responsible: string | null | undefined;
+    try {
+      recipient = optionalText(value.recipient);
+      subject = optionalText(value.subject);
+      objective = optionalText(value.objective);
+      dueAt = optionalText(value.dueAt);
+      notes = optionalText(value.notes);
+      agenda = optionalText(value.agenda);
+      responsible = optionalText(value.responsible);
+    } catch {
+      throw new DomainError('INVALID_REQUEST', 'Uno o más campos de la acción manual no son válidos.');
+    }
+    const request: CreateManualActionRequest = {
+      type: value.type as SuggestedActionType,
+      description: text(value.description, 'description'),
+      ...(recipient !== undefined && { recipient }),
+      ...(subject !== undefined && { subject }),
+      ...(objective !== undefined && { objective }),
+      ...(dueAt !== undefined && { dueAt }),
+      ...(notes !== undefined && { notes }),
+      ...(agenda !== undefined && { agenda }),
+      ...(responsible !== undefined && { responsible }),
+    };
+    return this.repository.createManualAction(id, request);
+  }
+
+  discardAction(id: string, actionId: string) {
+    if (!actionId.trim()) throw new DomainError('INVALID_REQUEST', 'actionId es obligatorio.');
+    return this.repository.discardAction(id, actionId.trim());
+  }
+
+  addActivity(id: string, input: unknown) {
+    const value = object(input, ['summary', 'detail', 'type']);
+    if (value.type !== undefined && value.type !== 'NOTE' && value.type !== 'REMINDER') {
+      throw new DomainError('INVALID_REQUEST', 'type de actividad no es válido.');
+    }
+    const request: AddActivityRequest = {
+      summary: text(value.summary, 'summary'),
+      ...(value.detail !== undefined && { detail: text(value.detail, 'detail') }),
+      ...(value.type === 'NOTE' || value.type === 'REMINDER' ? { type: value.type } : {}),
+    };
+    return this.repository.addActivity(id, request);
   }
 
   addEvidence(id: string, input: unknown) {

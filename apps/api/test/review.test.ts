@@ -158,8 +158,8 @@ test('HTTP review validates actors, dates, filters, stale edits and exposes safe
 
 test('legacy TRIAGED gaps require classification without inventing reviewer identity', t => {
   const { db, repository, create } = fixture(t); const id = create();
-  // A v4 store can be reopened repeatedly; a pre-migration snapshot has no review rows.
-  assert.equal(db.pragma('user_version', { simple: true }), 4);
+  // A current store can be reopened repeatedly; a pre-migration snapshot has no review rows.
+  assert.equal(db.pragma('user_version', { simple: true }), 5);
   db.prepare("UPDATE knowledge_gaps SET status = 'TRIAGED' WHERE id = ?").run(id);
   assert.equal(repository.getReview(id).review.disposition, 'ACCEPTED');
   assert.equal(repository.getReview(id).review.classifiedBy, null);
@@ -181,7 +181,7 @@ test('schema v3 migrates non-destructively and reopens with persistent review hi
     db.exec('DROP TABLE gap_review_events; DROP TABLE gap_reviews; PRAGMA user_version = 3;');
     db.close(); db = openDatabase(path);
     let migrated = new SQLiteKnowledgeRepository(db);
-    assert.equal(db.pragma('user_version', { simple: true }), 4);
+    assert.equal(db.pragma('user_version', { simple: true }), 5);
     assert.deepEqual(migrated.getGap(id), before);
     assert.equal(migrated.getReview(id).review.revision, 0);
     migrated.decideReview(id, { revision: 0, actor: 'Revisor sintético', decision: 'DISCARD_NOT_APPLICABLE', reason: 'Fuera de alcance' });
@@ -189,5 +189,26 @@ test('schema v3 migrates non-destructively and reopens with persistent review hi
     assert.equal(migrated.getReview(id).review.disposition, 'DISCARDED');
     assert.equal(migrated.getReview(id).history[0]?.reason, 'Fuera de alcance');
     assert.equal(migrated.listQueries().length, 1);
+  } finally { if (db.open) db.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('schema v4 from either branch migrates missing review or activity tables', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'nexa-v4-collision-'));
+  const path = join(directory, 'collision.db');
+  let db = openDatabase(path);
+  try {
+    const id = new SQLiteKnowledgeRepository(db).record('Pregunta sintética para colisión v4', { queryId: randomUUID(), answer: 'Sin información', sufficientKnowledge: false,
+      status: 'INSUFFICIENT', organizationallyRelevant: true, evidence: [] }, true).knowledgeGapId!;
+    db.exec('DROP TABLE gap_review_events; DROP TABLE gap_reviews; PRAGMA user_version = 4;');
+    db.close(); db = openDatabase(path);
+    assert.equal(db.pragma('user_version', { simple: true }), 5);
+    assert.equal(new SQLiteKnowledgeRepository(db).getReview(id).review.revision, 0);
+    db.exec('DROP TABLE recovery_activity; PRAGMA user_version = 4;');
+    db.close(); db = openDatabase(path);
+    assert.equal(db.pragma('user_version', { simple: true }), 5);
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('recovery_activity', 'gap_reviews') ORDER BY name")
+      .all() as Array<{ name: string }>;
+    assert.deepEqual(tables.map(row => row.name), ['gap_reviews', 'recovery_activity']);
+    assert.equal(new SQLiteKnowledgeRepository(db).getReview(id).review.revision, 0);
   } finally { if (db.open) db.close(); rmSync(directory, { recursive: true, force: true }); }
 });

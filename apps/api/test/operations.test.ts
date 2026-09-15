@@ -117,6 +117,50 @@ test('full human-controlled workflow versions evidence and drafts, publishes, re
   assert.throws(() => operations.transition(gapId, { fromStatus: 'RESOLVED', toStatus: 'IN_PROGRESS' }), DomainError);
 });
 
+test('action proposal and in-progress tracking support contacts, edits, discard, activity, and strategy return', async (t) => {
+  const { repository, operations, gapId } = await gapFixture(t);
+  operations.triage(gapId, { priority: 'HIGH', category: 'TI / Equipos' });
+  acceptAndClassify(repository, gapId);
+  const detail = repository.getGap(gapId)!;
+  assert.ok(detail.contacts.length >= 1);
+  assert.match(detail.missingInformation, /Aún no se ha recuperado/);
+  const first = detail.suggestedActions[0]!;
+  const second = detail.suggestedActions[1]!;
+  operations.transition(gapId, { fromStatus: 'TRIAGED', toStatus: 'ACTION_PROPOSED', selectedActionId: first.id });
+  const updated = operations.updateAction(gapId, {
+    actionId: first.id,
+    recipient: 'Andrea Sofía López <andrea.lopez@vallenorte.example>',
+    responsible: 'Andrea Sofía López',
+    objective: 'Documentar el procedimiento de baja de impresoras',
+    dueAt: '2026-09-21T18:00:00.000Z',
+    preparedEmailBody: 'Correo preparado de prueba',
+  });
+  assert.equal(updated.selectedAction?.objective, 'Documentar el procedimiento de baja de impresoras');
+  operations.discardAction(gapId, second.id);
+  assert.equal(repository.getGap(gapId)!.suggestedActions.find((item) => item.id === second.id)?.discarded, true);
+  const manual = operations.createManualAction(gapId, {
+    type: 'CREATE_DOCUMENTATION_TASK',
+    description: 'Registrar tarea externa de documentación',
+    responsible: 'Andrea Sofía López',
+  });
+  assert.ok(manual.suggestedActions.some((item) => item.type === 'CREATE_DOCUMENTATION_TASK'));
+  operations.transition(gapId, {
+    fromStatus: 'ACTION_PROPOSED', toStatus: 'IN_PROGRESS',
+    selectedActionId: first.id, approveSimulatedAction: true, humanNote: 'Confirmado para seguimiento.',
+  });
+  const progressing = operations.updateAction(gapId, {
+    actionId: first.id, executionStatus: 'SENT', sentAt: '2026-09-14T20:00:00.000Z',
+  });
+  assert.equal(progressing.selectedAction?.executionStatus, 'SENT');
+  const note = operations.addActivity(gapId, { summary: 'Se envió la solicitud simulada.', type: 'NOTE' });
+  assert.equal(note.summary, 'Se envió la solicitud simulada.');
+  assert.ok(repository.getGap(gapId)!.activity.length >= 2);
+  assert.equal(operations.transition(gapId, {
+    fromStatus: 'IN_PROGRESS', toStatus: 'ACTION_PROPOSED', humanNote: 'La estrategia debe cambiar.',
+  }).status, 'ACTION_PROPOSED');
+  assert.equal(repository.getGap(gapId)!.selectedAction?.approvedAt, null);
+});
+
 test('publication insertion failure rolls back approval and status', async (t) => {
   const { db, repository, operations, gapId } = await gapFixture(t);
   prepareForEvidence(repository, operations, gapId);
@@ -209,7 +253,7 @@ function submit(operations: KnowledgeOperationsService, gapId: string) {
 
 test('explicit transition matrix retains exactly eight states and cannot publish generically', () => {
   const allowed = new Set(['DETECTED:TRIAGED', 'TRIAGED:ACTION_PROPOSED', 'ACTION_PROPOSED:IN_PROGRESS',
-    'IN_PROGRESS:KNOWLEDGE_COLLECTED', 'KNOWLEDGE_COLLECTED:AWAITING_APPROVAL', 'PUBLISHED:RESOLVED']);
+    'IN_PROGRESS:KNOWLEDGE_COLLECTED', 'IN_PROGRESS:ACTION_PROPOSED', 'KNOWLEDGE_COLLECTED:AWAITING_APPROVAL', 'PUBLISHED:RESOLVED']);
   assert.equal(knowledgeGapStatuses.length, 8);
   for (const from of knowledgeGapStatuses) for (const to of knowledgeGapStatuses) {
     if (allowed.has(`${from}:${to}`)) assert.doesNotThrow(() => assertOperationTransition(from, to));
