@@ -181,3 +181,85 @@ test('reviewer assignment and comments require a draft and reject the author', a
     context.close();
   }
 });
+
+test('the checklist gates submission only for gaps whose draft review was started', async () => {
+  const context = harness();
+  try {
+    const id = gapInProgress(context.db);
+    await context.call(`/knowledge-gaps/${id}/evidence-items`, 'POST', {
+      type: 'MANUAL_TEXT', source: 'Soporte de TI (sintético)', author: 'Ana Documentación',
+      evidenceDate: collected, content: 'Se levanta acta y se retira el equipo del inventario.',
+    });
+    const gap = context.repository.getGap(id)!;
+    context.repository.transition(id, { fromStatus: 'IN_PROGRESS', toStatus: 'KNOWLEDGE_COLLECTED' });
+    context.repository.saveDraft(id, gap.evidenceRevision, 'Baja de impresoras', 'Contenido del borrador.');
+
+    // Touching the panel starts the draft review, which turns the checklist into a gate.
+    await context.call(`/knowledge-gaps/${id}/draft-review/checklist`, 'POST', {
+      revision: 0, confirmations: { answerClear: false, noImproperConfidentialInfo: false, readyForReview: false },
+    });
+    const blocked = await context.call(`/knowledge-gaps/${id}/transition`, 'POST', {
+      fromStatus: 'KNOWLEDGE_COLLECTED', toStatus: 'AWAITING_APPROVAL',
+    });
+    assert.equal(blocked.status, 409);
+    assert.match(String((blocked.body.error as { message: string }).message), /Lista de verificación incompleta/);
+
+    const confirmed = await context.call(`/knowledge-gaps/${id}/draft-review/checklist`, 'POST', {
+      revision: 1, confirmations: { answerClear: true, noImproperConfidentialInfo: true, readyForReview: true },
+    });
+    assert.equal(confirmed.status, 200);
+    assert.equal((confirmed.body as unknown as DraftReviewDetail).checklist.complete, true);
+    const allowed = await context.call(`/knowledge-gaps/${id}/transition`, 'POST', {
+      fromStatus: 'KNOWLEDGE_COLLECTED', toStatus: 'AWAITING_APPROVAL',
+    });
+    assert.equal(allowed.status, 200);
+  } finally {
+    context.close();
+  }
+});
+
+test('assigned reviewers decide with attribution and a gap without them keeps the previous flow', async () => {
+  const context = harness();
+  try {
+    const id = gapInProgress(context.db);
+    await context.call(`/knowledge-gaps/${id}/evidence-items`, 'POST', {
+      type: 'MANUAL_TEXT', source: 'Soporte de TI (sintético)', author: 'Ana Documentación',
+      evidenceDate: collected, content: 'Se levanta acta y se retira el equipo del inventario.',
+    });
+    const gap = context.repository.getGap(id)!;
+    context.repository.transition(id, { fromStatus: 'IN_PROGRESS', toStatus: 'KNOWLEDGE_COLLECTED' });
+    context.repository.saveDraft(id, gap.evidenceRevision, 'Baja de impresoras', 'Contenido del borrador.');
+    await context.call(`/knowledge-gaps/${id}/draft-review/reviewers`, 'POST', {
+      revision: 0, submittedBy: 'Ana Documentación', reviewers: ['Carmen Rivas'],
+    });
+    await context.call(`/knowledge-gaps/${id}/draft-review/checklist`, 'POST', {
+      revision: 1, confirmations: { answerClear: true, noImproperConfidentialInfo: true, readyForReview: true },
+    });
+    await context.call(`/knowledge-gaps/${id}/transition`, 'POST', {
+      fromStatus: 'KNOWLEDGE_COLLECTED', toStatus: 'AWAITING_APPROVAL',
+    });
+
+    const author = await context.call(`/knowledge-gaps/${id}/approval`, 'POST', {
+      decision: 'APPROVED', draftRevision: 1, actor: 'Ana Documentación',
+    });
+    assert.equal(author.status, 409, 'el autor no decide sobre su propio borrador');
+
+    const stranger = await context.call(`/knowledge-gaps/${id}/approval`, 'POST', {
+      decision: 'APPROVED', draftRevision: 1, actor: 'Luis Peña',
+    });
+    assert.equal(stranger.status, 409, 'solo un revisor asignado decide');
+
+    const approved = await context.call(`/knowledge-gaps/${id}/approval`, 'POST', {
+      decision: 'APPROVED', draftRevision: 1, actor: 'carmen  rivas', comment: 'Queda claro.',
+    });
+    assert.equal(approved.status, 200);
+
+    const detail = await context.call(`/knowledge-gaps/${id}/draft-review`);
+    const history = (detail.body as unknown as DraftReviewDetail).history;
+    assert.equal(history.length, 1);
+    assert.equal(history[0]!.actor, 'carmen rivas');
+    assert.equal(history[0]!.decision, 'APPROVED');
+  } finally {
+    context.close();
+  }
+});

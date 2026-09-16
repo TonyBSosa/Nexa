@@ -24,6 +24,8 @@ import {
   assertApprovalAllowed, assertDraftAllowed, assertEvidenceAllowed, assertOperationTransition,
   assertFreshDraft, assertTriageAllowed, DomainError, requireStatus,
 } from '../domain/workflow.js';
+import { assertReviewChecklistComplete } from '../domain/reviewChecklist.js';
+import { validateDraftReviewDecision } from '../domain/reviewRules.js';
 
 export class PersistenceError extends Error {
   constructor() { super('No se pudo guardar o leer la información.'); }
@@ -355,6 +357,11 @@ export class SQLiteKnowledgeRepository implements KnowledgeRepository {
         assertFreshDraft(draft, row.evidenceRevision);
         const reviewed = this.db.prepare<[string], { revision: number }>('SELECT COALESCE(MAX(draftRevision), 0) AS revision FROM approvals WHERE knowledgeGapId = ?').get(id)!;
         if (draft!.revision <= reviewed.revision) throw new DomainError('STALE_STATE', 'Genere una revisión nueva antes de enviarla.');
+        // The checklist only gates gaps whose draft review has been started, so
+        // flows that never open the panel keep their previous behaviour.
+        if (this.draftReviews.state(id).revision > 0) {
+          assertReviewChecklistComplete(this.draftReviews.checklist(id));
+        }
       }
       if (request.toStatus === 'RESOLVED') this.assertPublication(row);
       const selected = selectedAction ? actionFromUnknown(JSON.parse(selectedAction), row, 0) : null;
@@ -559,12 +566,25 @@ export class SQLiteKnowledgeRepository implements KnowledgeRepository {
       assertApprovalAllowed(row.status);
       if (prior) throw new DomainError('STALE_STATE', 'Esta revisión de borrador ya fue decidida; genere una revisión nueva.');
       const now = this.now().toISOString();
+      // Reviewer rules apply only once reviewers were assigned through the draft
+      // review panel; otherwise the previous unattributed decision still works.
+      const context = this.draftReviews.decisionContext(id);
+      const reviewed = context.assignedReviewers.length > 0;
+      // The validated actor is the normalized one, which is what gets recorded.
+      const actor = reviewed
+        ? validateDraftReviewDecision({ ...context, revisionAlreadyDecided: false }, {
+          actor: request.actor, decision: request.decision,
+          draftRevision: request.draftRevision, comment: request.comment ?? null,
+        }).actor
+        : null;
       const approval: Approval = {
         id: randomUUID(), knowledgeGapId: id, decision: request.decision,
         draftRevision: request.draftRevision, comment: request.comment?.trim() || null, createdAt: now,
       };
-      this.db.prepare(`INSERT INTO approvals (id, knowledgeGapId, decision, draftRevision, comment, createdAt)
-        VALUES (@id, @knowledgeGapId, @decision, @draftRevision, @comment, @createdAt)`).run(approval);
+      this.db.prepare(`INSERT INTO approvals (id, knowledgeGapId, decision, draftRevision, comment, createdAt, actor)
+        VALUES (@id, @knowledgeGapId, @decision, @draftRevision, @comment, @createdAt, @actor)`)
+        .run({ ...approval, actor });
+      if (reviewed) this.draftReviews.releaseRevision(id);
       if (request.decision !== 'APPROVED') {
         this.db.prepare("UPDATE knowledge_gaps SET status = 'KNOWLEDGE_COLLECTED', updatedAt = ? WHERE id = ?").run(now, id);
         return { approval, gapStatus: 'KNOWLEDGE_COLLECTED', publication: null };

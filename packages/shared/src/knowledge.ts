@@ -196,6 +196,8 @@ export interface ApprovalRequest {
   decision: ApprovalDecision;
   draftRevision: number;
   comment?: string;
+  /** Required once reviewers were assigned through the draft review panel. */
+  actor?: string;
 }
 
 export interface ApprovalResult {

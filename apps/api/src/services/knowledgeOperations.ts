@@ -273,7 +273,7 @@ export class KnowledgeOperationsService {
   }
 
   approval(id: string, input: unknown): ApprovalResult {
-    const value = object(input, ['decision', 'draftRevision', 'comment']);
+    const value = object(input, ['decision', 'draftRevision', 'comment', 'actor']);
     if (!['APPROVED', 'CHANGES_REQUESTED', 'REJECTED'].includes(value.decision as string)
       || !Number.isInteger(value.draftRevision) || (value.draftRevision as number) < 1) {
       throw new DomainError('INVALID_REQUEST', 'decision y draftRevision son obligatorios.');
@@ -283,9 +283,13 @@ export class KnowledgeOperationsService {
       throw new DomainError('INVALID_REQUEST', 'El comentario es obligatorio para solicitar cambios o rechazar.');
     }
     if (value.comment !== undefined && typeof value.comment !== 'string') throw new DomainError('INVALID_REQUEST', 'comment no es válido.');
+    if (value.actor !== undefined && (typeof value.actor !== 'string' || !value.actor.trim())) {
+      throw new DomainError('INVALID_REQUEST', 'actor no es válido.');
+    }
     const request: ApprovalRequest = {
       decision: value.decision as ApprovalRequest['decision'], draftRevision: value.draftRevision as number,
       ...(typeof value.comment === 'string' && { comment: value.comment.trim() }),
+      ...(typeof value.actor === 'string' && { actor: value.actor }),
     };
     return this.repository.approve(id, request);
   }
