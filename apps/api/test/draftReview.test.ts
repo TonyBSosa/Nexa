@@ -189,7 +189,7 @@ test('reviewer assignment and comments require a draft and reject the author', a
   }
 });
 
-test('the checklist gates submission only for gaps whose draft review was started', async () => {
+test('the checklist gates every submission, including gaps that never opened the panel', async () => {
   const context = harness();
   try {
     const id = gapInProgress(context.db);
@@ -201,10 +201,10 @@ test('the checklist gates submission only for gaps whose draft review was starte
     context.repository.transition(id, { fromStatus: 'IN_PROGRESS', toStatus: 'KNOWLEDGE_COLLECTED' });
     context.repository.saveDraft(id, gap.evidenceRevision, 'Baja de impresoras', 'Contenido del borrador.');
 
-    // Touching the panel starts the draft review, which turns the checklist into a gate.
-    await context.call(`/knowledge-gaps/${id}/draft-review/checklist`, 'POST', {
-      revision: 0, confirmations: { answerClear: false, noImproperConfidentialInfo: false, readyForReview: false },
-    });
+    // Nothing has touched the panel, so the draft review has no stored state.
+    const untouched = await context.call(`/knowledge-gaps/${id}/draft-review`);
+    assert.equal((untouched.body as unknown as DraftReviewDetail).state.revision, 0);
+
     const blocked = await context.call(`/knowledge-gaps/${id}/transition`, 'POST', {
       fromStatus: 'KNOWLEDGE_COLLECTED', toStatus: 'AWAITING_APPROVAL',
     });
@@ -212,7 +212,7 @@ test('the checklist gates submission only for gaps whose draft review was starte
     assert.match(String((blocked.body.error as { message: string }).message), /Lista de verificación incompleta/);
 
     const confirmed = await context.call(`/knowledge-gaps/${id}/draft-review/checklist`, 'POST', {
-      revision: 1, confirmations: { answerClear: true, noImproperConfidentialInfo: true, readyForReview: true },
+      revision: 0, confirmations: { answerClear: true, noImproperConfidentialInfo: true, readyForReview: true },
     });
     assert.equal(confirmed.status, 200);
     assert.equal((confirmed.body as unknown as DraftReviewDetail).checklist.complete, true);
@@ -225,7 +225,7 @@ test('the checklist gates submission only for gaps whose draft review was starte
   }
 });
 
-test('assigned reviewers decide with attribution and a gap without them keeps the previous flow', async () => {
+test('every decision is attributed and assigned reviewers restrict who may decide', async () => {
   const context = harness();
   try {
     const id = gapInProgress(context.db);
@@ -406,6 +406,46 @@ test('evidence without a file and unknown identifiers cannot be served', async (
     // A traversal attempt never reaches the file system.
     const traversal = await fetch(`${context.base}/knowledge-gaps/${id}/evidence/${encodeURIComponent('../../nexa.db')}/file`);
     assert.ok(traversal.status === 400 || traversal.status === 404, `estado inesperado ${traversal.status}`);
+  } finally {
+    context.close();
+  }
+});
+
+test('the author rule and attribution hold even without assigned reviewers', async () => {
+  const context = harness();
+  try {
+    const id = gapInProgress(context.db);
+    await context.call(`/knowledge-gaps/${id}/evidence-items`, 'POST', {
+      type: 'MANUAL_TEXT', source: 'Soporte de TI (sintetico)', author: 'Ana Documentación',
+      evidenceDate: collected, content: 'Se levanta acta y se retira el equipo del inventario.',
+    });
+    const gap = context.repository.getGap(id)!;
+    context.repository.transition(id, { fromStatus: 'IN_PROGRESS', toStatus: 'KNOWLEDGE_COLLECTED' });
+    context.repository.saveDraft(id, gap.evidenceRevision, 'Baja de impresoras', 'Contenido del borrador.');
+    // Reviewers are assigned and then the revision is released, so an author is
+    // recorded while assignedReviewers ends up empty.
+    await context.call(`/knowledge-gaps/${id}/draft-review/reviewers`, 'POST', {
+      revision: 0, submittedBy: 'Ana Documentación', reviewers: ['Carmen Rivas'],
+    });
+    await context.call(`/knowledge-gaps/${id}/draft-review/checklist`, 'POST', {
+      revision: 1, confirmations: { answerClear: true, noImproperConfidentialInfo: true, readyForReview: true },
+    });
+    await context.call(`/knowledge-gaps/${id}/transition`, 'POST', {
+      fromStatus: 'KNOWLEDGE_COLLECTED', toStatus: 'AWAITING_APPROVAL',
+    });
+
+    // Every decision must say who takes it.
+    const anonima = await context.call(`/knowledge-gaps/${id}/approval`, 'POST', {
+      decision: 'APPROVED', draftRevision: 1,
+    });
+    assert.equal(anonima.status, 400);
+
+    // The author is rejected regardless of how the name is spaced or cased.
+    const autor = await context.call(`/knowledge-gaps/${id}/approval`, 'POST', {
+      decision: 'APPROVED', draftRevision: 1, actor: 'ANA   documentación',
+    });
+    assert.equal(autor.status, 409);
+    assert.match(String((autor.body.error as { message: string }).message), /autor del contenido/);
   } finally {
     context.close();
   }

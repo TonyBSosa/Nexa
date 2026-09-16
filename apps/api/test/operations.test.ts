@@ -14,7 +14,9 @@ import { openDatabase } from '../src/persistence/database.js';
 import { PersistenceError, SQLiteKnowledgeRepository } from '../src/repositories/knowledge.js';
 import { ChatService } from '../src/services/chat.js';
 import { KnowledgeOperationsService } from '../src/services/knowledgeOperations.js';
-import { acceptAndClassify, metadataFor } from './reviewFixture.js';
+import { acceptAndClassify, confirmChecklist, metadataFor } from './reviewFixture.js';
+
+const revisor = 'Revisor sintético';
 
 const question = '¿Cuál es el procedimiento de la empresa para dar de baja una impresora?';
 const evidenceText = 'Antes de retirar una impresora, Soporte de TI verifica que el equipo ya no esté asignado a un usuario. El número de activo y número de serie se registran. Gestión de Activos actualiza el inventario. Si el equipo contiene almacenamiento interno, TI realiza el borrado correspondiente. Finalmente, Gestión de Activos autoriza la baja y registra el destino del equipo.';
@@ -72,34 +74,37 @@ test('full human-controlled workflow versions evidence and drafts, publishes, re
   assert.equal(draft1.evidenceRevisionUsed, 2);
   assert.match(draft1.content, /Soporte de TI verifica/);
   assert.equal(repository.getGap(gapId)?.status, 'KNOWLEDGE_COLLECTED');
+  confirmChecklist(repository, gapId);
   operations.transition(gapId, { fromStatus: 'KNOWLEDGE_COLLECTED', toStatus: 'AWAITING_APPROVAL' });
 
-  const changes = operations.approval(gapId, { decision: 'CHANGES_REQUESTED', draftRevision: 1, comment: 'Aclarar el cierre.' });
+  const changes = operations.approval(gapId, { actor: revisor, decision: 'CHANGES_REQUESTED', draftRevision: 1, comment: 'Aclarar el cierre.' });
   assert.equal(changes.gapStatus, 'KNOWLEDGE_COLLECTED');
-  assert.throws(() => operations.approval(gapId, { decision: 'APPROVED', draftRevision: 1 }), DomainError);
+  assert.throws(() => operations.approval(gapId, { actor: revisor, decision: 'APPROVED', draftRevision: 1 }), DomainError);
   operations.addEvidence(gapId, { content: 'El registro final incluye el destino del equipo.', origin: 'Aclaración sintética' });
   assert.equal(repository.getGap(gapId)?.evidenceRevision, 3);
 
   const draft2 = await operations.draft(gapId, { mode: 'GENERATE', evidenceRevision: 3 });
   assert.equal(draft2.revision, 2);
   assert.equal(repository.getGap(gapId)?.drafts[0]?.evidenceRevisionUsed, 2);
-  assert.throws(() => operations.approval(gapId, { decision: 'APPROVED', draftRevision: 1 }), DomainError);
+  assert.throws(() => operations.approval(gapId, { actor: revisor, decision: 'APPROVED', draftRevision: 1 }), DomainError);
+  confirmChecklist(repository, gapId);
   operations.transition(gapId, { fromStatus: 'KNOWLEDGE_COLLECTED', toStatus: 'AWAITING_APPROVAL' });
-  const rejected = operations.approval(gapId, { decision: 'REJECTED', draftRevision: 2, comment: 'Revisar redacción.' });
+  const rejected = operations.approval(gapId, { actor: revisor, decision: 'REJECTED', draftRevision: 2, comment: 'Revisar redacción.' });
   assert.equal(rejected.gapStatus, 'KNOWLEDGE_COLLECTED');
-  assert.throws(() => operations.approval(gapId, { decision: 'APPROVED', draftRevision: 2 }), DomainError);
+  assert.throws(() => operations.approval(gapId, { actor: revisor, decision: 'APPROVED', draftRevision: 2 }), DomainError);
 
   const draft3 = await operations.draft(gapId, {
     mode: 'SAVE', evidenceRevision: 3, title: draft2.title, content: `${draft2.content}\nRevisión humana aplicada.`,
   });
   assert.equal(draft3.revision, 3);
+  confirmChecklist(repository, gapId);
   operations.transition(gapId, { fromStatus: 'KNOWLEDGE_COLLECTED', toStatus: 'AWAITING_APPROVAL' });
-  const published = operations.approval(gapId, { decision: 'APPROVED', draftRevision: 3, comment: 'Validado por una persona.' });
+  const published = operations.approval(gapId, { actor: revisor, decision: 'APPROVED', draftRevision: 3, comment: 'Validado por una persona.' });
   assert.equal(published.gapStatus, 'PUBLISHED');
   assert.ok(published.publication);
   assert.equal(repository.listApprovedKnowledge().length, 1);
   assert.equal(repository.getGap(gapId)?.status, 'PUBLISHED');
-  const retry = operations.approval(gapId, { decision: 'APPROVED', draftRevision: 3 });
+  const retry = operations.approval(gapId, { actor: revisor, decision: 'APPROVED', draftRevision: 3 });
   assert.equal(retry.publication?.articleId, published.publication.articleId);
   assert.equal(repository.getGap(gapId)?.approvals.length, 3);
   assert.equal(repository.listApprovedKnowledge().length, 1);
@@ -180,9 +185,10 @@ test('publication insertion failure rolls back approval and status', async (t) =
   operations.addEvidence(gapId, { content: evidenceText, origin: 'Evidencia sintética' });
   operations.transition(gapId, { fromStatus: 'IN_PROGRESS', toStatus: 'KNOWLEDGE_COLLECTED' });
   const draft = await operations.draft(gapId, { mode: 'GENERATE', evidenceRevision: 1 });
+  confirmChecklist(repository, gapId);
   operations.transition(gapId, { fromStatus: 'KNOWLEDGE_COLLECTED', toStatus: 'AWAITING_APPROVAL' });
   db.exec("CREATE TRIGGER fail_publication BEFORE INSERT ON approved_knowledge BEGIN SELECT RAISE(ABORT, 'simulated publication failure'); END;");
-  assert.throws(() => operations.approval(gapId, { decision: 'APPROVED', draftRevision: draft.revision }), PersistenceError);
+  assert.throws(() => operations.approval(gapId, { actor: revisor, decision: 'APPROVED', draftRevision: draft.revision }), PersistenceError);
   const detail = repository.getGap(gapId)!;
   assert.equal(detail.status, 'AWAITING_APPROVAL');
   assert.equal(detail.approvals.length, 0);
@@ -216,8 +222,9 @@ test('HTTP operations expose the detailed workflow and approved knowledge', asyn
   const draftResult = await request(`/knowledge-gaps/${gapId}/draft`, 'POST', { mode: 'GENERATE', evidenceRevision: 1 });
   assert.equal(draftResult.response.status, 201);
   const draft = draftResult.body as unknown as KnowledgeDraft;
+  assert.equal((await request(`/knowledge-gaps/${gapId}/draft-review/checklist`, 'POST', { revision: 0, confirmations: { answerClear: true, noImproperConfidentialInfo: true, readyForReview: true } })).response.status, 200);
   assert.equal((await request(`/knowledge-gaps/${gapId}/transition`, 'POST', { fromStatus: 'KNOWLEDGE_COLLECTED', toStatus: 'AWAITING_APPROVAL' })).response.status, 200);
-  const approvalResult = await request(`/knowledge-gaps/${gapId}/approval`, 'POST', { decision: 'APPROVED', draftRevision: draft.revision });
+  const approvalResult = await request(`/knowledge-gaps/${gapId}/approval`, 'POST', { actor: revisor, decision: 'APPROVED', draftRevision: draft.revision });
   assert.equal((approvalResult.body as unknown as ApprovalResult).gapStatus, 'PUBLISHED');
   const knowledge = await (await fetch(`${base}/knowledge`)).json() as { items: unknown[] };
   assert.equal(knowledge.items.length, 1);
@@ -260,7 +267,8 @@ async function draftFixture(t: TestContext) {
   return { ...result, draft };
 }
 
-function submit(operations: KnowledgeOperationsService, gapId: string) {
+function submit(repository: SQLiteKnowledgeRepository, operations: KnowledgeOperationsService, gapId: string) {
+  confirmChecklist(repository, gapId);
   return operations.transition(gapId, { fromStatus: 'KNOWLEDGE_COLLECTED', toStatus: 'AWAITING_APPROVAL' });
 }
 
@@ -290,11 +298,11 @@ test('narrow writes preserve state; explicit transitions enforce evidence, fresh
   operations.addEvidence(gapId, { content: evidenceText, origin: 'Synthetic' });
   assert.equal(repository.getGap(gapId)!.status, 'IN_PROGRESS');
   operations.transition(gapId, { fromStatus: 'IN_PROGRESS', toStatus: 'KNOWLEDGE_COLLECTED' });
-  assert.throws(() => submit(operations, gapId), domainCode('STALE_STATE'));
+  assert.throws(() => submit(repository, operations, gapId), domainCode('STALE_STATE'));
   const draft = await operations.draft(gapId, { mode: 'GENERATE', evidenceRevision: 1 });
   assert.equal(repository.getGap(gapId)!.status, 'KNOWLEDGE_COLLECTED');
-  assert.throws(() => operations.approval(gapId, { decision: 'APPROVED', draftRevision: draft.revision }), domainCode('INVALID_TRANSITION'));
-  submit(operations, gapId);
+  assert.throws(() => operations.approval(gapId, { actor: revisor, decision: 'APPROVED', draftRevision: draft.revision }), domainCode('INVALID_TRANSITION'));
+  submit(repository, operations, gapId);
   assert.throws(() => operations.addEvidence(gapId, { content: 'New', origin: 'Synthetic' }), domainCode('INVALID_TRANSITION'));
   assert.throws(() => operations.transition(gapId, { fromStatus: 'AWAITING_APPROVAL', toStatus: 'RESOLVED' }), domainCode('INVALID_TRANSITION'));
   assert.equal(repository.listApprovedKnowledge().length, 0);
@@ -305,12 +313,12 @@ test('valid evidence N to N+1 makes current draft stale for submission and appro
   operations.addEvidence(gapId, { content: 'Nueva aclaración sintética.', origin: 'Synthetic' });
   assert.equal(repository.getGap(gapId)!.evidenceRevision, 2);
   assert.equal(repository.getGap(gapId)!.currentDraft!.evidenceRevisionUsed, 1);
-  assert.throws(() => submit(operations, gapId), domainCode('STALE_STATE'));
-  assert.throws(() => operations.approval(gapId, { decision: 'APPROVED', draftRevision: draft.revision }), domainCode('STALE_STATE'));
+  assert.throws(() => submit(repository, operations, gapId), domainCode('STALE_STATE'));
+  assert.throws(() => operations.approval(gapId, { actor: revisor, decision: 'APPROVED', draftRevision: draft.revision }), domainCode('STALE_STATE'));
   await assert.rejects(operations.draft(gapId, { mode: 'GENERATE', evidenceRevision: 1 }), domainCode('STALE_STATE'));
   // Defense-in-depth fixture: stale current draft already under review cannot publish either.
   db.prepare("UPDATE knowledge_gaps SET status = 'AWAITING_APPROVAL' WHERE id = ?").run(gapId);
-  assert.throws(() => operations.approval(gapId, { decision: 'APPROVED', draftRevision: draft.revision }), domainCode('STALE_STATE'));
+  assert.throws(() => operations.approval(gapId, { actor: revisor, decision: 'APPROVED', draftRevision: draft.revision }), domainCode('STALE_STATE'));
   assert.equal(repository.getGap(gapId)!.approvals.length, 0);
   assert.equal(repository.listApprovedKnowledge().length, 0);
 });
@@ -334,17 +342,17 @@ test('negative decisions require newer revisions and older drafts never become a
   const { repository, operations, gapId, draft } = await draftFixture(t);
   let current = draft;
   for (const decision of ['CHANGES_REQUESTED', 'REJECTED'] as const) {
-    submit(operations, gapId);
-    operations.approval(gapId, { decision, draftRevision: current.revision, comment: 'Revise synthetic draft' });
-    assert.throws(() => submit(operations, gapId), domainCode('STALE_STATE'));
+    submit(repository, operations, gapId);
+    operations.approval(gapId, { actor: revisor, decision, draftRevision: current.revision, comment: 'Revise synthetic draft' });
+    assert.throws(() => submit(repository, operations, gapId), domainCode('STALE_STATE'));
     const older = current.revision;
     current = await operations.draft(gapId, { mode: 'SAVE', evidenceRevision: 1, title: current.title, content: `${current.content}\nHuman revision ${older}.` });
     assert.equal(current.revision, older + 1);
-    submit(operations, gapId);
-    assert.throws(() => operations.approval(gapId, { decision: 'APPROVED', draftRevision: older }), domainCode('STALE_STATE'));
+    submit(repository, operations, gapId);
+    assert.throws(() => operations.approval(gapId, { actor: revisor, decision: 'APPROVED', draftRevision: older }), domainCode('STALE_STATE'));
     // Return the current revision to collection for the next review cycle.
     if (decision === 'CHANGES_REQUESTED') {
-      operations.approval(gapId, { decision: 'CHANGES_REQUESTED', draftRevision: current.revision, comment: 'Further revision' });
+      operations.approval(gapId, { actor: revisor, decision: 'CHANGES_REQUESTED', draftRevision: current.revision, comment: 'Further revision' });
       current = await operations.draft(gapId, { mode: 'GENERATE', evidenceRevision: 1 });
     }
   }
@@ -353,20 +361,20 @@ test('negative decisions require newer revisions and older drafts never become a
 
 test('approval replay is identical only for APPROVED, including after resolution', async (t) => {
   const { repository, operations, gapId, draft, db } = await draftFixture(t);
-  submit(operations, gapId);
-  const approved = operations.approval(gapId, { decision: 'APPROVED', draftRevision: draft.revision });
+  submit(repository, operations, gapId);
+  const approved = operations.approval(gapId, { actor: revisor, decision: 'APPROVED', draftRevision: draft.revision });
   for (const status of ['PUBLISHED', 'RESOLVED'] as const) {
     if (status === 'RESOLVED') operations.transition(gapId, { fromStatus: 'PUBLISHED', toStatus: 'RESOLVED' });
     const before = repository.getGap(gapId);
-    const retry = operations.approval(gapId, { decision: 'APPROVED', draftRevision: draft.revision });
+    const retry = operations.approval(gapId, { actor: revisor, decision: 'APPROVED', draftRevision: draft.revision });
     assert.deepEqual(retry, { ...approved, gapStatus: status });
     for (const decision of ['CHANGES_REQUESTED', 'REJECTED'] as const) {
-      assert.throws(() => operations.approval(gapId, { decision, draftRevision: draft.revision, comment: 'Conflicting review' }), domainCode('INVALID_TRANSITION'));
+      assert.throws(() => operations.approval(gapId, { actor: revisor, decision, draftRevision: draft.revision, comment: 'Conflicting review' }), domainCode('INVALID_TRANSITION'));
       assert.deepEqual(repository.getGap(gapId), before);
     }
   }
   db.prepare('UPDATE approved_knowledge SET revision = 2 WHERE sourceKnowledgeGapId = ?').run(gapId);
-  assert.throws(() => operations.approval(gapId, { decision: 'APPROVED', draftRevision: draft.revision }), domainCode('STALE_STATE'));
+  assert.throws(() => operations.approval(gapId, { actor: revisor, decision: 'APPROVED', draftRevision: draft.revision }), domainCode('STALE_STATE'));
 });
 
 test('evidence and draft failures roll back inserted rows, versions, and timestamps', async (t) => {
@@ -385,25 +393,25 @@ test('evidence and draft failures roll back inserted rows, versions, and timesta
 
 test('failure after article insertion rolls back article, approval, and publication state', async (t) => {
   const { repository, operations, gapId, draft, db } = await draftFixture(t);
-  submit(operations, gapId);
+  submit(repository, operations, gapId);
   const before = repository.getGap(gapId);
   db.exec("CREATE TRIGGER fail_final_state BEFORE UPDATE OF status ON knowledge_gaps WHEN NEW.status = 'PUBLISHED' BEGIN SELECT RAISE(ABORT, 'forced final state failure'); END;");
-  assert.throws(() => operations.approval(gapId, { decision: 'APPROVED', draftRevision: draft.revision }), PersistenceError);
+  assert.throws(() => operations.approval(gapId, { actor: revisor, decision: 'APPROVED', draftRevision: draft.revision }), PersistenceError);
   assert.deepEqual(repository.getGap(gapId), before);
   assert.equal(repository.listApprovedKnowledge().length, 0);
   db.exec('DROP TRIGGER fail_final_state');
-  assert.equal(operations.approval(gapId, { decision: 'APPROVED', draftRevision: draft.revision }).gapStatus, 'PUBLISHED');
+  assert.equal(operations.approval(gapId, { actor: revisor, decision: 'APPROVED', draftRevision: draft.revision }).gapStatus, 'PUBLISHED');
 });
 
 test('published knowledge wins over a delayed insufficient provider result before and after resolution', async (t) => {
   for (const resolve of [false, true]) await t.test(resolve ? 'RESOLVED' : 'PUBLISHED', async (t) => {
     const { repository, operations, provider, gapId, draft } = await draftFixture(t);
-    submit(operations, gapId);
+    submit(repository, operations, gapId);
     const deferred = deferredResult<QuestionAssessment>();
     const delayed = new ChatService({ assessQuestion: () => deferred.promise, generateKnowledgeDraft: provider.generateKnowledgeDraft.bind(provider) }, repository);
     const pending = delayed.chat({ message: question });
     const before = repository.getGap(gapId)!.occurrences;
-    const published = operations.approval(gapId, { decision: 'APPROVED', draftRevision: draft.revision });
+    const published = operations.approval(gapId, { actor: revisor, decision: 'APPROVED', draftRevision: draft.revision });
     if (resolve) operations.transition(gapId, { fromStatus: 'PUBLISHED', toStatus: 'RESOLVED' });
     deferred.resolve(await provider.assessQuestion({ question }));
     const result = await pending;
@@ -425,13 +433,13 @@ test('published knowledge wins over a delayed insufficient provider result befor
 test('drafts are excluded and approved local knowledge wins before the provider', async (t) => {
   const { repository, operations, provider, chat, gapId, draft } = await draftFixture(t);
   for (const underReview of [false, true]) {
-    if (underReview) submit(operations, gapId);
+    if (underReview) submit(repository, operations, gapId);
     const result = await chat.chat({ message: question });
     assert.equal(result.status, 'INSUFFICIENT');
     assert.equal(result.answer.includes(draft.content), false);
     assert.equal(result.evidence.some((item) => item.sourceId === 'nexa-approved'), false);
   }
-  operations.approval(gapId, { decision: 'APPROVED', draftRevision: draft.revision });
+  operations.approval(gapId, { actor: revisor, decision: 'APPROVED', draftRevision: draft.revision });
   const occurrences = repository.getGap(gapId)!.occurrences;
   let calls = 0;
   const boundary = new ChatService({

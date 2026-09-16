@@ -27,7 +27,7 @@ import {
   assertFreshDraft, assertTriageAllowed, DomainError, requireStatus,
 } from '../domain/workflow.js';
 import { assertReviewChecklistComplete } from '../domain/reviewChecklist.js';
-import { validateDraftReviewDecision } from '../domain/reviewRules.js';
+import { normalizeActor, sameActor, validateDraftReviewDecision } from '../domain/reviewRules.js';
 
 /** Uploads sit beside the database, under the repository-root data directory. */
 const defaultUploadsRoot = fileURLToPath(new URL('../../../../data/uploads', import.meta.url));
@@ -368,11 +368,7 @@ export class SQLiteKnowledgeRepository implements KnowledgeRepository {
         assertFreshDraft(draft, row.evidenceRevision);
         const reviewed = this.db.prepare<[string], { revision: number }>('SELECT COALESCE(MAX(draftRevision), 0) AS revision FROM approvals WHERE knowledgeGapId = ?').get(id)!;
         if (draft!.revision <= reviewed.revision) throw new DomainError('STALE_STATE', 'Genere una revisión nueva antes de enviarla.');
-        // The checklist only gates gaps whose draft review has been started, so
-        // flows that never open the panel keep their previous behaviour.
-        if (this.draftReviews.state(id).revision > 0) {
-          assertReviewChecklistComplete(this.draftReviews.checklist(id));
-        }
+        assertReviewChecklistComplete(this.draftReviews.checklist(id));
       }
       if (request.toStatus === 'RESOLVED') this.assertPublication(row);
       const selected = selectedAction ? actionFromUnknown(JSON.parse(selectedAction), row, 0) : null;
@@ -577,17 +573,21 @@ export class SQLiteKnowledgeRepository implements KnowledgeRepository {
       assertApprovalAllowed(row.status);
       if (prior) throw new DomainError('STALE_STATE', 'Esta revisión de borrador ya fue decidida; genere una revisión nueva.');
       const now = this.now().toISOString();
-      // Reviewer rules apply only once reviewers were assigned through the draft
-      // review panel; otherwise the previous unattributed decision still works.
+      // The author may never decide on their own draft. When no reviewers were
+      // assigned, any other declared person may, so the rule holds without
+      // forcing every gap through the assignment step.
       const context = this.draftReviews.decisionContext(id);
-      const reviewed = context.assignedReviewers.length > 0;
-      // The validated actor is the normalized one, which is what gets recorded.
-      const actor = reviewed
-        ? validateDraftReviewDecision({ ...context, revisionAlreadyDecided: false }, {
-          actor: request.actor, decision: request.decision,
+      const actor = normalizeActor(request.actor, 'actor');
+      if (context.submittedBy && sameActor(actor, context.submittedBy)) {
+        throw new DomainError('APPROVAL_REQUIRED', 'El autor del contenido no puede decidir sobre su propia revisión.');
+      }
+      if (context.assignedReviewers.length > 0) {
+        validateDraftReviewDecision({ ...context, revisionAlreadyDecided: false }, {
+          actor, decision: request.decision,
           draftRevision: request.draftRevision, comment: request.comment ?? null,
-        }).actor
-        : null;
+        });
+      }
+      const reviewed = context.assignedReviewers.length > 0;
       const approval: Approval = {
         id: randomUUID(), knowledgeGapId: id, decision: request.decision,
         draftRevision: request.draftRevision, comment: request.comment?.trim() || null, createdAt: now,
