@@ -4,7 +4,7 @@ Chat, queries, Knowledge Operations, health, and local approved-article routes a
 
 ## Conventions and Shared DTOs
 
-Use JSON, opaque string IDs, ISO-8601 UTC timestamps, and camelCase fields. Examples use synthetic data; the Finance/scanner examples describe the planned presentation, while the current fake provider supports the printer fixtures in README.md. Lists use `{ "items": [] }`; pagination is deferred. Missing optional values may be omitted; explicitly unknown scalar values use `null`. Successful reads, updates, and chat assessments return 200; new evidence and draft revisions return 201. Chat retains the accepted message/evidence naming and observability behavior.
+Use JSON, opaque string IDs, ISO-8601 UTC timestamps, and camelCase fields. Examples use synthetic data; the Finance/scanner examples describe the planned presentation, while the current fake provider supports the printer fixtures in README.md. Existing lists use `{ "items": [] }`; the new review list includes pagination metadata as documented below. Missing optional values may be omitted; explicitly unknown scalar values use `null`. Successful reads, updates, and chat assessments return 200; new evidence and draft revisions return 201. Chat retains the accepted message/evidence naming and observability behavior.
 
 | DTO | Fields / meaning |
 | --- | --- |
@@ -13,8 +13,10 @@ Use JSON, opaque string IDs, ISO-8601 UTC timestamps, and camelCase fields. Exam
 | ChatResponse | `answer`, `sufficientKnowledge`, `status`: SUFFICIENT/INSUFFICIENT/FAILURE, `organizationallyRelevant`: boolean/null, `evidence`: EvidenceReference[], `queryId`, optional `knowledgeGapId`, optional recovery suggestions and `error` (AGENT_UNAVAILABLE/OUT_OF_SCOPE). |
 | SourceReference | Renamed `EvidenceReference`: `sourceId`, `title`, optional `documentId` and `locator`; approved local content requires `articleId` and positive `articleRevision`. No provider-specific payloads. |
 | KnowledgeGapStatus | Exactly `DETECTED`, `TRIAGED`, `ACTION_PROPOSED`, `IN_PROGRESS`, `KNOWLEDGE_COLLECTED`, `AWAITING_APPROVAL`, `PUBLISHED`, `RESOLVED`. |
-| SuggestedAction | Provider proposal: `type`, nonempty `description`. Persisted `RecoveryAction` additionally has `id`, `simulated`: true, `humanNote`: string/null, `createdAt`, `updatedAt`, `approvedAt`: timestamp/null. Selected and suggested representations expose identical approval metadata. |
-| KnowledgeGap | List/triage shape: `id`, `originalQuestion`, `normalizedQuestionKey`, separate display `title`, `category`: string/null, `status`, `priority` (LOW/MEDIUM/HIGH), `occurrences`, `evidenceRevision` (initially 0), `suggestedDepartment`: string/null, `suggestedExperts`: string[], `suggestedActions`: RecoveryAction[], `selectedAction`: RecoveryAction/null, `createdAt`, `updatedAt`. Detail (`KnowledgeGapDetail`) additionally contains `collectedInformation`: CollectedEvidence[], `drafts`: KnowledgeDraft[] in ascending revision order, `currentDraft`: KnowledgeDraft/null, `approvals`: Approval[], `publishedArticle`: ApprovedKnowledgeArticle/null. |
+| SuggestedAction | Provider proposal: `type`, nonempty `description`. Persisted `RecoveryAction` additionally has `id`, `simulated`: true, `humanNote`: string/null, `createdAt`, `updatedAt`, `approvedAt`: timestamp/null, `discarded`: boolean, `recipient`/`subject`/`objective`/`dueAt`/`notes`/`agenda`/`meetingLink`/`meetingAt`/`externalTaskReference`/`responsible`/`preparedEmailBody`/`reminderNote`/`sentAt`/`respondedAt`/`responseAttachment`/`cancelReason`: string/null, `participants`: string[], and `executionStatus` (`PENDING`/`SENT`/`WAITING_RESPONSE`/`RESPONDED`/`COMPLETED`/`CANCELLED`). Selected and suggested representations expose identical approval/tracking metadata. |
+| KnowledgeGap | List/triage shape: `id`, `originalQuestion`, `normalizedQuestionKey`, separate display `title`, `category`: string/null, `status`, `priority` (LOW/MEDIUM/HIGH), `occurrences`, `evidenceRevision` (initially 0), `suggestedDepartment`: string/null, `suggestedExperts`: string[], `suggestedActions`: RecoveryAction[], `selectedAction`: RecoveryAction/null, `createdAt`, `updatedAt`. Detail (`KnowledgeGapDetail`) additionally contains `collectedInformation`: CollectedEvidence[], `drafts`: KnowledgeDraft[] in ascending revision order, `currentDraft`: KnowledgeDraft/null, `approvals`: Approval[], `publishedArticle`: ApprovedKnowledgeArticle/null, `contacts`: ContactPerson[], `activity`: ActivityEvent[] (newest first), and `missingInformation`: string. |
+| ContactPerson | Synthetic directory entry: `id`, `name`, `title`, `department`, `email`, `phone`: string/null, `availability` (`AVAILABLE`/`BUSY`/`AWAY`/`UNKNOWN`). Tentative role mapping from department/experts; not verified identity. An unmatched department returns no contact instead of falling back to an unrelated department. |
+| ActivityEvent | Recovery timeline entry: `id`, `knowledgeGapId`, `type`, `summary`, `detail`: string/null, `createdAt`. |
 | CollectedInformation | Named `CollectedEvidence`: `id`, `knowledgeGapId`, `content`, `sourceType`: MANUAL, `sourceLabel` (the submitted origin), `reference`: string/null, positive `revision`, `createdAt`. |
 | KnowledgeDraft | `id`, `knowledgeGapId`, `title`, `content`, positive `revision`, `evidenceRevisionUsed`, `publication`: PublishedArticleReference/null, `createdAt`, `updatedAt`. Generation/save increments revision without submitting for review. |
 | PublishedArticleReference | `articleId`, `articleRevision`: positive integer, `sourceId` (`nexa-approved` for MVP). Identifies published content, not just its source. |
@@ -34,7 +36,10 @@ Metrics cover accepted organizational outcomes only: filter organizationallyRele
 | DTO | Fields |
 | --- | --- |
 | TriageUpdateRequest | At least one of `priority`, `category`, `suggestedDepartment` (string/null), `suggestedExperts` (string[]). Omitted fields unchanged; null/empty array clears optional suggestions. |
-| GapTransitionRequest | Required `fromStatus`, `toStatus`; `selectedActionId` and `approveSimulatedAction: true` required when entering IN_PROGRESS. Selection may also be recorded when entering ACTION_PROPOSED. Optional `humanNote` accompanies action selection/approval. |
+| GapTransitionRequest | Required `fromStatus`, `toStatus`; `selectedActionId` and `approveSimulatedAction: true` required when entering IN_PROGRESS. Selection may also be recorded when entering ACTION_PROPOSED. Optional `humanNote` accompanies action selection/approval; nonempty `humanNote` is required when returning IN_PROGRESS → ACTION_PROPOSED. |
+| UpdateRecoveryActionRequest | Required `actionId`; optional editable RecoveryAction tracking fields listed above. |
+| CreateManualActionRequest | Required `type`, `description`; optional recipient/subject/objective/dueAt/notes/agenda/responsible. |
+| AddActivityRequest | Required nonempty `summary`; optional `detail`; optional `type` (`NOTE` or `REMINDER`). |
 | AddEvidenceRequest | Required nonempty `content`, `origin`; optional nonempty `reference`. |
 | GenerateDraftRequest | Required `mode` (GENERATE or SAVE), `evidenceRevision`; SAVE also requires nonempty `title`, `content`. |
 | ApprovalRequest | Required `decision`, `draftRevision`; optional `comment`, mandatory nonempty for CHANGES_REQUESTED/REJECTED. |
@@ -138,7 +143,7 @@ Nonempty items use the KnowledgeGap list shape; fetch the detail endpoint for ev
 Purpose: gap details. No body.
 
 ```json
-{"id":"gap-1","originalQuestion":"At Valle Norte Supplies, who approves an urgent supplier payment when the Finance Lead is absent?","normalizedQuestionKey":"at valle norte supplies who approves an urgent supplier payment when the finance lead is absent","title":"Urgent supplier payment approval during Finance Lead absence","category":"Finance","status":"DETECTED","priority":"MEDIUM","occurrences":1,"evidenceRevision":0,"suggestedDepartment":"Finance","suggestedExperts":["Finance Lead"],"suggestedActions":[{"id":"action-1","type":"REQUEST_INFORMATION","description":"Ask the Finance Lead to document the absence approval procedure.","simulated":true,"approvedAt":null,"humanNote":null,"createdAt":"2026-09-06T15:01:00Z","updatedAt":"2026-09-06T15:01:00Z"}],"collectedInformation":[],"approvals":[],"createdAt":"2026-09-06T15:01:00Z","updatedAt":"2026-09-06T15:01:00Z","selectedAction":null,"drafts":[],"currentDraft":null,"publishedArticle":null}
+{"id":"gap-1","originalQuestion":"At Valle Norte Supplies, who approves an urgent supplier payment when the Finance Lead is absent?","normalizedQuestionKey":"at valle norte supplies who approves an urgent supplier payment when the finance lead is absent","title":"Urgent supplier payment approval during Finance Lead absence","category":"Finance","status":"DETECTED","priority":"MEDIUM","occurrences":1,"evidenceRevision":0,"suggestedDepartment":"Finance","suggestedExperts":["Finance Lead"],"suggestedActions":[{"id":"action-1","type":"REQUEST_INFORMATION","description":"Ask the Finance Lead to document the absence approval procedure.","simulated":true,"approvedAt":null,"humanNote":null,"discarded":false,"recipient":null,"subject":"NEXA · recuperación de conocimiento","objective":"Recuperar la información faltante: Ask the Finance Lead to document the absence approval procedure.","dueAt":"2026-09-13T15:01:00.000Z","notes":null,"agenda":null,"meetingLink":null,"meetingAt":null,"participants":[],"externalTaskReference":null,"responsible":null,"executionStatus":"PENDING","sentAt":null,"respondedAt":null,"responseAttachment":null,"cancelReason":null,"preparedEmailBody":"Hola,...","reminderNote":null,"createdAt":"2026-09-06T15:01:00Z","updatedAt":"2026-09-06T15:01:00Z"}],"collectedInformation":[],"approvals":[],"createdAt":"2026-09-06T15:01:00Z","updatedAt":"2026-09-06T15:01:00Z","selectedAction":null,"drafts":[],"currentDraft":null,"publishedArticle":null,"contacts":[{"id":"contact-finance-lead","name":"María Elena Quintero","title":"Finance Lead","department":"Finance","email":"maria.quintero@vallenorte.example","phone":"ext. 210","availability":"AVAILABLE"}],"activity":[],"missingInformation":"Aún no se ha recuperado el procedimiento o la respuesta documentada para: “At Valle Norte Supplies, who approves an urgent supplier payment when the Finance Lead is absent?”."}
 ```
 
 Errors: NOT_FOUND, PERSISTENCE_ERROR.
@@ -155,9 +160,27 @@ Purpose: advance an administrator-controlled workflow step using GapTransitionRe
 {"id":"gap-1","status":"IN_PROGRESS","updatedAt":"2026-09-06T15:02:00Z"}
 ```
 
-Allowed forward steps: DETECTED → TRIAGED → ACTION_PROPOSED → IN_PROGRESS → KNOWLEDGE_COLLECTED → AWAITING_APPROVAL; PUBLISHED → RESOLVED. TRIAGED records human review. Evidence is required for KNOWLEDGE_COLLECTED. AWAITING_APPROVAL requires a saved draft whose evidenceRevisionUsed equals the gap's current version and whose revision is newer than any rejected/change-requested revision. ACTION_PROPOSED requires a usable proposal (deterministic REQUEST_INFORMATION fallback if AI provides none). Only approval can enter PUBLISHED or return a reviewed draft to KNOWLEDGE_COLLECTED. RESOLVED requires explicit human closure after local publication. Response is a mutation receipt; reload detail for full state.
+Allowed generic steps: TRIAGED → ACTION_PROPOSED → IN_PROGRESS → KNOWLEDGE_COLLECTED → AWAITING_APPROVAL; PUBLISHED → RESOLVED. DETECTED → TRIAGED requires acceptance through the review decision endpoint; generic attempts return 409 APPROVAL_REQUIRED. TRIAGED → ACTION_PROPOSED requires confirmed classification with category, department and responsible person, plus a usable proposal (deterministic REQUEST_INFORMATION fallback if AI provides none). Additionally, IN_PROGRESS → ACTION_PROPOSED is allowed when a nonempty `humanNote` justifies changing the recovery strategy. Evidence is required for KNOWLEDGE_COLLECTED. AWAITING_APPROVAL requires a saved draft whose evidenceRevisionUsed equals the gap's current version and whose revision is newer than any rejected/change-requested revision. ACTION_PROPOSED requires a usable proposal (deterministic REQUEST_INFORMATION fallback if AI provides none). Entering IN_PROGRESS requires a selected action with responsible, recipient, objective, and dueAt, plus `approveSimulatedAction: true`. Only approval can enter PUBLISHED or return a reviewed draft to KNOWLEDGE_COLLECTED. RESOLVED requires explicit human closure after local publication. Response is a mutation receipt; reload detail for full state.
 
 Errors: INVALID_REQUEST, NOT_FOUND, STALE_STATE, INVALID_TRANSITION, APPROVAL_REQUIRED, PERSISTENCE_ERROR. No arbitrary status jump or real external action is permitted.
+
+## PATCH /api/knowledge-gaps/:id/action
+
+Purpose: edit a recovery action during TRIAGED, ACTION_PROPOSED, or IN_PROGRESS. Request requires `actionId` and may include recipient, subject, description, objective, dueAt, notes, agenda, meetingLink, meetingAt, participants, externalTaskReference, responsible, executionStatus (`PENDING` | `SENT` | `WAITING_RESPONSE` | `RESPONDED` | `COMPLETED` | `CANCELLED`), sentAt, respondedAt, responseAttachment, cancelReason, preparedEmailBody, reminderNote, humanNote. Timestamp fields must be valid ISO-8601 UTC values and are normalized to millisecond precision. Cancelled status requires a human-provided cancelReason. Returns KnowledgeGapDetail. External systems are never invoked.
+
+## POST /api/knowledge-gaps/:id/actions
+
+Purpose: create a manual recovery action during TRIAGED or ACTION_PROPOSED. Request: `type`, `description`, and optional recipient/subject/objective/dueAt/notes/agenda/responsible. Returns KnowledgeGapDetail (201).
+
+## POST /api/knowledge-gaps/:id/actions/:actionId/discard
+
+Purpose: discard a suggestion during TRIAGED or ACTION_PROPOSED while leaving at least one usable action. Returns KnowledgeGapDetail.
+
+## POST /api/knowledge-gaps/:id/activity
+
+Purpose: append a timeline note or reminder during ACTION_PROPOSED, IN_PROGRESS, or KNOWLEDGE_COLLECTED. Request: `summary`, optional `detail`, optional `type` (`NOTE` | `REMINDER`). Returns ActivityEvent (201).
+
+KnowledgeGapDetail additionally exposes `contacts` (synthetic directory people with name, title, department, email, phone, availability), `activity` (newest first), and `missingInformation` (clear statement of what still needs recovery). RecoveryAction also carries the editable proposal/tracking fields above; `simulated` remains true and Outlook/Gmail/Zoom automation is out of MVP scope.
 
 ## POST /api/knowledge-gaps/:id/evidence
 
@@ -215,6 +238,8 @@ Errors: INVALID_REQUEST, NOT_FOUND, STALE_STATE (draft/evidence revision mismatc
 
 Purpose: narrow metadata edits during DETECTED or TRIAGED using TriageUpdateRequest; no status change. Suggestions remain tentative role/department labels, not verified identities. Request:
 
+This legacy endpoint rejects discarded/duplicate requests and invalidates any prior classification confirmation. The review endpoint below supports the expanded form.
+
 ```json
 {"priority":"HIGH","category":"Finance","suggestedDepartment":"Finance","suggestedExperts":["Finance Lead"]}
 ```
@@ -224,6 +249,18 @@ Purpose: narrow metadata edits during DETECTED or TRIAGED using TriageUpdateRequ
 The response includes all KnowledgeGap list fields defined above; status remains DETECTED or TRIAGED.
 
 Errors: INVALID_REQUEST (empty update, invalid priority, unsupported fields), NOT_FOUND, INVALID_TRANSITION, PERSISTENCE_ERROR. Cannot edit matching keys, occurrences, evidence, drafts, approvals, or lifecycle status through triage. This is not generic CRUD.
+
+## Detection and classification review endpoints
+
+These additive endpoints use shared `review.ts` DTOs. All writes are transactional, reject unsupported fields and validate `revision` (nonnegative integer) against current review metadata. Stale edits/decisions return 409 STALE_STATE. Storage failures return sanitized 500 PERSISTENCE_ERROR; unknown IDs return 404 NOT_FOUND; invalid input returns 400 INVALID_REQUEST and disallowed workflow operations return 409 INVALID_TRANSITION/APPROVAL_REQUIRED. All successful responses are HTTP 200. No delete endpoint exists.
+
+- `GET /api/knowledge-reviews`: `{items, total, page, pageSize}`. Items retain KnowledgeGap fields and add `reviewDisposition`. Defaults page=1/pageSize=10; max pageSize=100. Filters: q (literal case-insensitive SQLite substring in title/question), disposition (PENDING/ACCEPTED/DISCARDED/DUPLICATE), priority, exact department, lifecycle status, from/to (inclusive creation dates, YYYY-MM-DD). Sort creation descending then ID. Empty pages return items=[] and the filtered total. Existing `/knowledge-gaps` remains unpaginated for compatibility.
+- `GET /api/knowledge-gaps/:id/review`: `{review, history, sensitiveWarning, origin, similarGaps}`. Review includes revision, disposition, reason, duplicateOf, responsible, sensitivity (NORMAL/INTERNAL/SENSITIVE), targetDate, importance, relatedGapIds, relatedArticleIds, reviewedBy/At and classifiedBy/At. Origin is Asistente NEXA when query linkage exists, otherwise unknown. History lists decision actor, action, reason and timestamp newest first. Similar gaps are at most five with two or more shared words longer than three characters, ordered by shared-word count then ID. Sensitivity warning uses explicit keywords and is advisory.
+- `PATCH /api/knowledge-gaps/:id/review`: full editable form `{revision,title,category,priority,department,responsible,experts,sensitivity,targetDate,importance,relatedGapIds,relatedArticleIds}`; title must be nonempty; category/department/responsible/importance may be empty until classification. targetDate is null or a valid YYYY-MM-DD. Lists max 50; text max 2000 characters. Requires active DETECTED/TRIAGED; validates related IDs, rejects self-relation, invalidates classification and leaves lifecycle state unchanged. Returns ReviewDetail.
+- `POST /api/knowledge-gaps/:id/review/decision`: `{revision,decision,actor,reason?,duplicateOf?}`. actor is required declared text, not authenticated identity. ACCEPT on active DETECTED records human review and enters TRIAGED. DISCARD_NOT_APPLICABLE, DISCARD_SENSITIVE and DISCARD_IMPROPER require a reason and remain DETECTED/DISCARDED. DUPLICATE requires another existing non-discarded/non-duplicate target and remains DETECTED/DUPLICATE. RESTORE on discarded/duplicate returns DETECTED/PENDING; RETURN on TRIAGED also returns DETECTED/PENDING. These clear classification confirmation and append an immutable audit snapshot. Returns ReviewDetail.
+- `POST /api/knowledge-gaps/:id/review/classify`: `{revision,actor}`. Requires active TRIAGED, nonempty category, department, responsible and importance. Records classifiedBy/At for the saved revision, appends a snapshot and stays TRIAGED ready for ACTION_PROPOSED. Returns ReviewDetail. Edits require renewed confirmation.
+
+Review dispositions never alter query outcomes, merge demand or introduce lifecycle stages. A repeat eligible question still links/counts using the existing canonical-key/session rules and does not restore a discarded request. Existing aggregate metrics include preserved lifecycle records; disposition counts are available via the filtered review list. Related articles are references only; they do not become new evidence or grant publication authority. Existing later-stage records continue without fabricated review history; legacy TRIAGED records must complete classification.
 
 ## GET /api/knowledge
 

@@ -7,12 +7,14 @@ import { knowledgeGapStatuses } from '@nexa/shared';
 import type { ApprovalResult, ChatResponse, KnowledgeDraft, KnowledgeGapDetail, QuestionAssessment } from '@nexa/shared';
 import type { AgentProvider } from '../src/integrations/agent/AgentProvider.js';
 import { createApp } from '../src/app.js';
+import { contactsForGap } from '../src/domain/contacts.js';
 import { assertOperationTransition, DomainError } from '../src/domain/workflow.js';
 import { FakeAgentProvider } from '../src/integrations/agent/FakeAgentProvider.js';
 import { openDatabase } from '../src/persistence/database.js';
 import { PersistenceError, SQLiteKnowledgeRepository } from '../src/repositories/knowledge.js';
 import { ChatService } from '../src/services/chat.js';
 import { KnowledgeOperationsService } from '../src/services/knowledgeOperations.js';
+import { acceptAndClassify, metadataFor } from './reviewFixture.js';
 
 const question = '¿Cuál es el procedimiento de la empresa para dar de baja una impresora?';
 const evidenceText = 'Antes de retirar una impresora, Soporte de TI verifica que el equipo ya no esté asignado a un usuario. El número de activo y número de serie se registran. Gestión de Activos actualiza el inventario. Si el equipo contiene almacenamiento interno, TI realiza el borrado correspondiente. Finalmente, Gestión de Activos autoriza la baja y registra el destino del equipo.';
@@ -38,7 +40,7 @@ function prepareForEvidence(repository: SQLiteKnowledgeRepository, operations: K
   assert.throws(() => operations.transition(gapId, { fromStatus: 'DETECTED', toStatus: 'IN_PROGRESS' }), DomainError);
   const triaged = operations.triage(gapId, { priority: 'HIGH', category: 'TI / Equipos' });
   assert.equal(triaged.status, 'DETECTED');
-  operations.transition(gapId, { fromStatus: 'DETECTED', toStatus: 'TRIAGED' });
+  acceptAndClassify(repository, gapId);
   const action = triaged.suggestedActions[0]!;
   assert.equal(operations.transition(gapId, {
     fromStatus: 'TRIAGED', toStatus: 'ACTION_PROPOSED', selectedActionId: action.id,
@@ -116,6 +118,62 @@ test('full human-controlled workflow versions evidence and drafts, publishes, re
   assert.throws(() => operations.transition(gapId, { fromStatus: 'RESOLVED', toStatus: 'IN_PROGRESS' }), DomainError);
 });
 
+test('action proposal and in-progress tracking support contacts, edits, discard, activity, and strategy return', async (t) => {
+  const { repository, operations, gapId } = await gapFixture(t);
+  operations.triage(gapId, { priority: 'HIGH', category: 'TI / Equipos' });
+  acceptAndClassify(repository, gapId);
+  const detail = repository.getGap(gapId)!;
+  assert.ok(detail.contacts.length >= 1);
+  assert.deepEqual(contactsForGap('Legal', []), []);
+  assert.match(detail.missingInformation, /Aún no se ha recuperado/);
+  const first = detail.suggestedActions[0]!;
+  const second = detail.suggestedActions[1]!;
+  assert.equal(first.recipient, null);
+  assert.equal(first.responsible, null);
+  operations.transition(gapId, { fromStatus: 'TRIAGED', toStatus: 'ACTION_PROPOSED', selectedActionId: first.id });
+  assert.ok(repository.getGap(gapId)!.selectedAction?.recipient);
+  assert.throws(() => operations.updateAction(gapId, { actionId: first.id, dueAt: 'mañana' }), DomainError);
+  assert.throws(() => operations.updateAction(gapId, { actionId: first.id, dueAt: '2026-02-30T12:00:00Z' }), DomainError);
+  const updated = operations.updateAction(gapId, {
+    actionId: first.id,
+    recipient: 'Andrea Sofía López <andrea.lopez@vallenorte.example>',
+    responsible: 'Andrea Sofía López',
+    objective: 'Documentar el procedimiento de baja de impresoras',
+    dueAt: '2026-09-21T18:00:00.000Z',
+    preparedEmailBody: 'Correo preparado de prueba',
+  });
+  assert.equal(updated.selectedAction?.objective, 'Documentar el procedimiento de baja de impresoras');
+  operations.discardAction(gapId, second.id);
+  assert.equal(repository.getGap(gapId)!.suggestedActions.find((item) => item.id === second.id)?.discarded, true);
+  const manual = operations.createManualAction(gapId, {
+    type: 'CREATE_DOCUMENTATION_TASK',
+    description: 'Registrar tarea externa de documentación',
+    responsible: 'Andrea Sofía López',
+  });
+  assert.ok(manual.suggestedActions.some((item) => item.type === 'CREATE_DOCUMENTATION_TASK'));
+  assert.throws(() => operations.createManualAction(gapId, {
+    type: 'REQUEST_INFORMATION', description: 'Fecha inválida', dueAt: 'next week',
+  }), DomainError);
+  operations.transition(gapId, {
+    fromStatus: 'ACTION_PROPOSED', toStatus: 'IN_PROGRESS',
+    selectedActionId: first.id, approveSimulatedAction: true, humanNote: 'Confirmado para seguimiento.',
+  });
+  assert.throws(() => operations.updateAction(gapId, {
+    actionId: first.id, executionStatus: 'CANCELLED',
+  }), DomainError);
+  const progressing = operations.updateAction(gapId, {
+    actionId: first.id, executionStatus: 'SENT', sentAt: '2026-09-14T20:00:00.000Z',
+  });
+  assert.equal(progressing.selectedAction?.executionStatus, 'SENT');
+  const note = operations.addActivity(gapId, { summary: 'Se envió la solicitud simulada.', type: 'NOTE' });
+  assert.equal(note.summary, 'Se envió la solicitud simulada.');
+  assert.ok(repository.getGap(gapId)!.activity.length >= 2);
+  assert.equal(operations.transition(gapId, {
+    fromStatus: 'IN_PROGRESS', toStatus: 'ACTION_PROPOSED', humanNote: 'La estrategia debe cambiar.',
+  }).status, 'ACTION_PROPOSED');
+  assert.equal(repository.getGap(gapId)!.selectedAction?.approvedAt, null);
+});
+
 test('publication insertion failure rolls back approval and status', async (t) => {
   const { db, repository, operations, gapId } = await gapFixture(t);
   prepareForEvidence(repository, operations, gapId);
@@ -145,7 +203,10 @@ test('HTTP operations expose the detailed workflow and approved knowledge', asyn
   const gapId = (chatResult.body as unknown as ChatResponse).knowledgeGapId!;
   const triage = await request(`/knowledge-gaps/${gapId}/triage`, 'PATCH', { priority: 'HIGH' });
   assert.equal(triage.response.status, 200);
-  assert.equal((await request(`/knowledge-gaps/${gapId}/transition`, 'POST', { fromStatus: 'DETECTED', toStatus: 'TRIAGED' })).response.status, 200);
+  assert.equal((await request(`/knowledge-gaps/${gapId}/transition`, 'POST', { fromStatus: 'DETECTED', toStatus: 'TRIAGED' })).response.status, 409);
+  assert.equal((await request(`/knowledge-gaps/${gapId}/review/decision`, 'POST', { revision: repository.getReview(gapId).review.revision, decision: 'ACCEPT', actor: 'Revisor sintético' })).response.status, 200);
+  assert.equal((await request(`/knowledge-gaps/${gapId}/review`, 'PATCH', metadataFor(repository, gapId))).response.status, 200);
+  assert.equal((await request(`/knowledge-gaps/${gapId}/review/classify`, 'POST', { revision: repository.getReview(gapId).review.revision, actor: 'Clasificador sintético' })).response.status, 200);
   const detail = await (await fetch(`${base}/knowledge-gaps/${gapId}`)).json() as KnowledgeGapDetail;
   const actionId = detail.suggestedActions[0]!.id;
   assert.equal((await request(`/knowledge-gaps/${gapId}/transition`, 'POST', { fromStatus: 'TRIAGED', toStatus: 'ACTION_PROPOSED', selectedActionId: actionId })).response.status, 200);
@@ -205,7 +266,7 @@ function submit(operations: KnowledgeOperationsService, gapId: string) {
 
 test('explicit transition matrix retains exactly eight states and cannot publish generically', () => {
   const allowed = new Set(['DETECTED:TRIAGED', 'TRIAGED:ACTION_PROPOSED', 'ACTION_PROPOSED:IN_PROGRESS',
-    'IN_PROGRESS:KNOWLEDGE_COLLECTED', 'KNOWLEDGE_COLLECTED:AWAITING_APPROVAL', 'PUBLISHED:RESOLVED']);
+    'IN_PROGRESS:KNOWLEDGE_COLLECTED', 'IN_PROGRESS:ACTION_PROPOSED', 'KNOWLEDGE_COLLECTED:AWAITING_APPROVAL', 'PUBLISHED:RESOLVED']);
   assert.equal(knowledgeGapStatuses.length, 8);
   for (const from of knowledgeGapStatuses) for (const to of knowledgeGapStatuses) {
     if (allowed.has(`${from}:${to}`)) assert.doesNotThrow(() => assertOperationTransition(from, to));
@@ -218,7 +279,7 @@ test('narrow writes preserve state; explicit transitions enforce evidence, fresh
   operations.triage(gapId, { priority: 'HIGH' });
   assert.equal(repository.getGap(gapId)!.status, 'DETECTED');
   assert.throws(() => operations.addEvidence(gapId, { content: evidenceText, origin: 'Synthetic' }), domainCode('INVALID_TRANSITION'));
-  operations.transition(gapId, { fromStatus: 'DETECTED', toStatus: 'TRIAGED' });
+  acceptAndClassify(repository, gapId);
   operations.transition(gapId, { fromStatus: 'TRIAGED', toStatus: 'ACTION_PROPOSED' });
   const action = repository.getGap(gapId)!.suggestedActions[0]!;
   assert.throws(() => operations.transition(gapId, { fromStatus: 'ACTION_PROPOSED', toStatus: 'IN_PROGRESS', selectedActionId: action.id }), domainCode('APPROVAL_REQUIRED'));
@@ -413,7 +474,7 @@ test('malformed provider shapes fail cleanly and unusable proposals become a lab
   assert.equal(gap.suggestedActions.length, 1);
   assert.equal(gap.suggestedActions[0]!.type, 'REQUEST_INFORMATION');
   assert.match(gap.suggestedActions[0]!.description, /determinista de respaldo/);
-  operations.transition(gap.id, { fromStatus: 'DETECTED', toStatus: 'TRIAGED' });
+  acceptAndClassify(repository, gap.id);
   operations.transition(gap.id, { fromStatus: 'TRIAGED', toStatus: 'ACTION_PROPOSED' });
 });
 

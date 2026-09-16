@@ -15,6 +15,7 @@ export function assertOperationTransition(from: KnowledgeGapStatus, to: Knowledg
     || (from === 'TRIAGED' && to === 'ACTION_PROPOSED')
     || (from === 'ACTION_PROPOSED' && to === 'IN_PROGRESS')
     || (from === 'IN_PROGRESS' && to === 'KNOWLEDGE_COLLECTED')
+    || (from === 'IN_PROGRESS' && to === 'ACTION_PROPOSED')
     || (from === 'KNOWLEDGE_COLLECTED' && to === 'AWAITING_APPROVAL')
     || (from === 'PUBLISHED' && to === 'RESOLVED');
   if (!allowed) throw new DomainError('INVALID_TRANSITION', `No se permite avanzar de ${from} a ${to} mediante esta operación.`);
