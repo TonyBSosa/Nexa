@@ -263,7 +263,7 @@ export class SQLiteKnowledgeRepository implements KnowledgeRepository {
       ).all(id);
       return {
         ...gap, collectedInformation, drafts, currentDraft: drafts.at(-1) ?? null,
-        approvals: this.db.prepare<[string], Approval>('SELECT id, knowledgeGapId, decision, draftRevision, comment, createdAt FROM approvals WHERE knowledgeGapId = ? ORDER BY createdAt, rowid').all(id),
+        approvals: this.db.prepare<[string], Approval>('SELECT id, knowledgeGapId, decision, draftRevision, comment, actor, createdAt FROM approvals WHERE knowledgeGapId = ? ORDER BY createdAt, rowid').all(id),
         publishedArticle: article,
         contacts: contactsForGap(gap.suggestedDepartment, gap.suggestedExperts),
         activity,
@@ -562,7 +562,7 @@ export class SQLiteKnowledgeRepository implements KnowledgeRepository {
   approve(id: string, request: ApprovalRequest): ApprovalResult {
     return this.guard(() => this.db.transaction((): ApprovalResult => {
       const row = this.gapRow(id);
-      const prior = this.db.prepare<[string, number], Approval>('SELECT id, knowledgeGapId, decision, draftRevision, comment, createdAt FROM approvals WHERE knowledgeGapId = ? AND draftRevision = ?').get(id, request.draftRevision);
+      const prior = this.db.prepare<[string, number], Approval>('SELECT id, knowledgeGapId, decision, draftRevision, comment, actor, createdAt FROM approvals WHERE knowledgeGapId = ? AND draftRevision = ?').get(id, request.draftRevision);
       if (prior?.decision === 'APPROVED' && (row.status === 'PUBLISHED' || row.status === 'RESOLVED')) {
         if (request.decision !== 'APPROVED') throw new DomainError('INVALID_TRANSITION', 'No se puede cambiar una aprobación publicada.');
         const priorArticle = this.assertPublication(row, request.draftRevision);
@@ -590,11 +590,11 @@ export class SQLiteKnowledgeRepository implements KnowledgeRepository {
       const reviewed = context.assignedReviewers.length > 0;
       const approval: Approval = {
         id: randomUUID(), knowledgeGapId: id, decision: request.decision,
-        draftRevision: request.draftRevision, comment: request.comment?.trim() || null, createdAt: now,
+        draftRevision: request.draftRevision, comment: request.comment?.trim() || null,
+        actor, createdAt: now,
       };
       this.db.prepare(`INSERT INTO approvals (id, knowledgeGapId, decision, draftRevision, comment, createdAt, actor)
-        VALUES (@id, @knowledgeGapId, @decision, @draftRevision, @comment, @createdAt, @actor)`)
-        .run({ ...approval, actor });
+        VALUES (@id, @knowledgeGapId, @decision, @draftRevision, @comment, @createdAt, @actor)`).run(approval);
       if (reviewed) this.draftReviews.releaseRevision(id);
       if (request.decision !== 'APPROVED') {
         this.db.prepare("UPDATE knowledge_gaps SET status = 'KNOWLEDGE_COLLECTED', updatedAt = ? WHERE id = ?").run(now, id);
@@ -621,7 +621,7 @@ export class SQLiteKnowledgeRepository implements KnowledgeRepository {
     const draft = this.latestDraft(row.id);
     assertFreshDraft(draft, row.evidenceRevision, requestedRevision);
     const article = this.db.prepare<[string], ApprovedKnowledgeArticle>('SELECT * FROM approved_knowledge WHERE sourceKnowledgeGapId = ?').get(row.id);
-    const approval = this.db.prepare<[string, number], Approval>('SELECT id, knowledgeGapId, decision, draftRevision, comment, createdAt FROM approvals WHERE knowledgeGapId = ? AND draftRevision = ?').get(row.id, draft!.revision);
+    const approval = this.db.prepare<[string, number], Approval>('SELECT id, knowledgeGapId, decision, draftRevision, comment, actor, createdAt FROM approvals WHERE knowledgeGapId = ? AND draftRevision = ?').get(row.id, draft!.revision);
     if (!article || approval?.decision !== 'APPROVED' || article.approvedDraftRevision !== draft!.revision
       || article.revision !== 1 || !article.articleId || article.normalizedQuestionKey !== row.normalizedQuestionKey
       || article.title !== draft!.title || article.content !== draft!.content) {

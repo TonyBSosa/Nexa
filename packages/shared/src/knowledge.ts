@@ -108,6 +108,8 @@ export interface Approval {
   decision: ApprovalDecision;
   draftRevision: number;
   comment: string | null;
+  /** Declared name of whoever decided; never a verified identity. */
+  actor: string | null;
   createdAt: string;
 }
 

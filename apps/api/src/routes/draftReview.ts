@@ -86,7 +86,7 @@ export function createDraftReviewRouter(repository: KnowledgeRepository) {
       // different type nor let the file load anything of its own.
       response.setHeader('Content-Type', file.mimeType);
       response.setHeader('X-Content-Type-Options', 'nosniff');
-      response.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+      response.setHeader('Content-Security-Policy', "default-src 'none'");
       response.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(file.fileName)}`);
       response.send(file.bytes);
     } catch (error) { next(error); }
