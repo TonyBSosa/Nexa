@@ -7,6 +7,7 @@ import { knowledgeGapStatuses } from '@nexa/shared';
 import type { ApprovalResult, ChatResponse, KnowledgeDraft, KnowledgeGapDetail, QuestionAssessment } from '@nexa/shared';
 import type { AgentProvider } from '../src/integrations/agent/AgentProvider.js';
 import { createApp } from '../src/app.js';
+import { contactsForGap } from '../src/domain/contacts.js';
 import { assertOperationTransition, DomainError } from '../src/domain/workflow.js';
 import { FakeAgentProvider } from '../src/integrations/agent/FakeAgentProvider.js';
 import { openDatabase } from '../src/persistence/database.js';
@@ -123,10 +124,16 @@ test('action proposal and in-progress tracking support contacts, edits, discard,
   acceptAndClassify(repository, gapId);
   const detail = repository.getGap(gapId)!;
   assert.ok(detail.contacts.length >= 1);
+  assert.deepEqual(contactsForGap('Legal', []), []);
   assert.match(detail.missingInformation, /Aún no se ha recuperado/);
   const first = detail.suggestedActions[0]!;
   const second = detail.suggestedActions[1]!;
+  assert.equal(first.recipient, null);
+  assert.equal(first.responsible, null);
   operations.transition(gapId, { fromStatus: 'TRIAGED', toStatus: 'ACTION_PROPOSED', selectedActionId: first.id });
+  assert.ok(repository.getGap(gapId)!.selectedAction?.recipient);
+  assert.throws(() => operations.updateAction(gapId, { actionId: first.id, dueAt: 'mañana' }), DomainError);
+  assert.throws(() => operations.updateAction(gapId, { actionId: first.id, dueAt: '2026-02-30T12:00:00Z' }), DomainError);
   const updated = operations.updateAction(gapId, {
     actionId: first.id,
     recipient: 'Andrea Sofía López <andrea.lopez@vallenorte.example>',
@@ -144,10 +151,16 @@ test('action proposal and in-progress tracking support contacts, edits, discard,
     responsible: 'Andrea Sofía López',
   });
   assert.ok(manual.suggestedActions.some((item) => item.type === 'CREATE_DOCUMENTATION_TASK'));
+  assert.throws(() => operations.createManualAction(gapId, {
+    type: 'REQUEST_INFORMATION', description: 'Fecha inválida', dueAt: 'next week',
+  }), DomainError);
   operations.transition(gapId, {
     fromStatus: 'ACTION_PROPOSED', toStatus: 'IN_PROGRESS',
     selectedActionId: first.id, approveSimulatedAction: true, humanNote: 'Confirmado para seguimiento.',
   });
+  assert.throws(() => operations.updateAction(gapId, {
+    actionId: first.id, executionStatus: 'CANCELLED',
+  }), DomainError);
   const progressing = operations.updateAction(gapId, {
     actionId: first.id, executionStatus: 'SENT', sentAt: '2026-09-14T20:00:00.000Z',
   });

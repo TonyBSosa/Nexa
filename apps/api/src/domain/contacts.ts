@@ -90,11 +90,6 @@ export function contactsForGap(department: string | null, experts: string[]): Co
       }
     }
   }
-  if (!selected.size && department) {
-    const fallback = SYNTHETIC_CONTACTS.find((contact) => contact.department === 'Finance')
-      ?? SYNTHETIC_CONTACTS[0];
-    if (fallback) selected.set(fallback.id, fallback);
-  }
   return [...selected.values()];
 }
 

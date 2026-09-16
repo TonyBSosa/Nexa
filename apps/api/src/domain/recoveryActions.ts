@@ -49,9 +49,9 @@ export function enrichActionDefaults(
   id?: string; createdAt?: string; updatedAt?: string; approvedAt?: string | null;
 } {
   const primary = context.contacts[0] ?? null;
-  const responsible = action.responsible ?? primary?.name ?? context.department ?? 'Responsable de recuperación';
+  const responsible = action.responsible ?? primary?.name ?? null;
   const recipient = action.recipient
-    ?? (primary ? `${primary.name} <${primary.email}>` : responsible);
+    ?? (primary ? `${primary.name} <${primary.email}>` : null);
   const objective = action.objective ?? `Recuperar la información faltante: ${action.description}`;
   const subject = action.subject ?? (
     action.type === 'DRAFT_EMAIL' || action.type === 'REQUEST_INFORMATION' || action.type === 'REQUEST_DOCUMENT'
@@ -75,7 +75,7 @@ export function enrichActionDefaults(
     agenda: action.agenda ?? (action.type === 'PROPOSE_MEETING' ? '1) Contexto de la brecha\n2) Información requerida\n3) Próximos pasos de documentación' : null),
     meetingLink: action.meetingLink ?? null,
     meetingAt: action.meetingAt ?? null,
-    participants: action.participants ?? (primary ? [primary.name] : []),
+    participants: action.participants?.length ? action.participants : (primary ? [primary.name] : []),
     externalTaskReference: action.externalTaskReference ?? null,
     responsible,
     executionStatus: action.executionStatus ?? 'PENDING',
@@ -101,6 +101,7 @@ export function createRecoveryAction(
   now: string,
   context: { question: string; contacts: ContactPerson[]; department: string | null },
   extras: Partial<RecoveryAction> = {},
+  deferContactDefaults = false,
 ): RecoveryAction {
   const enriched = enrichActionDefaults({ ...base, ...extras }, context, now);
   return {
@@ -113,7 +114,7 @@ export function createRecoveryAction(
     updatedAt: now,
     approvedAt: null,
     discarded: false,
-    recipient: enriched.recipient,
+    recipient: deferContactDefaults && extras.recipient === undefined ? null : enriched.recipient,
     subject: enriched.subject,
     objective: enriched.objective,
     dueAt: enriched.dueAt,
@@ -121,9 +122,9 @@ export function createRecoveryAction(
     agenda: enriched.agenda,
     meetingLink: enriched.meetingLink,
     meetingAt: enriched.meetingAt,
-    participants: enriched.participants,
+    participants: deferContactDefaults && extras.participants === undefined ? [] : enriched.participants,
     externalTaskReference: enriched.externalTaskReference,
-    responsible: enriched.responsible,
+    responsible: deferContactDefaults && extras.responsible === undefined ? null : enriched.responsible,
     executionStatus: 'PENDING',
     sentAt: null,
     respondedAt: null,

@@ -24,6 +24,23 @@ function text(value: unknown, name: string): string {
   return value.trim();
 }
 
+function optionalUtcTimestamp(value: unknown): string | null | undefined {
+  const timestamp = optionalText(value);
+  if (timestamp === undefined || timestamp === null) return timestamp;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(timestamp)) {
+    throw new Error('invalid UTC timestamp');
+  }
+  const parsed = new Date(timestamp);
+  if (!Number.isFinite(parsed.getTime())) throw new Error('invalid UTC timestamp');
+  const withoutZone = timestamp.slice(0, -1);
+  const separator = withoutZone.indexOf('.');
+  const normalized = separator < 0
+    ? `${withoutZone}.000Z`
+    : `${withoutZone.slice(0, separator)}.${withoutZone.slice(separator + 1).padEnd(3, '0')}Z`;
+  if (parsed.toISOString() !== normalized) throw new Error('invalid UTC timestamp');
+  return normalized;
+}
+
 const actionTypes: SuggestedActionType[] = [
   'REQUEST_INFORMATION', 'DRAFT_EMAIL', 'PROPOSE_MEETING', 'REQUEST_DOCUMENT', 'CREATE_DOCUMENTATION_TASK',
 ];
@@ -114,15 +131,15 @@ export class KnowledgeOperationsService {
       recipient = optionalText(value.recipient);
       subject = optionalText(value.subject);
       objective = optionalText(value.objective);
-      dueAt = optionalText(value.dueAt);
+      dueAt = optionalUtcTimestamp(value.dueAt);
       notes = optionalText(value.notes);
       agenda = optionalText(value.agenda);
       meetingLink = optionalText(value.meetingLink);
-      meetingAt = optionalText(value.meetingAt);
+      meetingAt = optionalUtcTimestamp(value.meetingAt);
       externalTaskReference = optionalText(value.externalTaskReference);
       responsible = optionalText(value.responsible);
-      sentAt = optionalText(value.sentAt);
-      respondedAt = optionalText(value.respondedAt);
+      sentAt = optionalUtcTimestamp(value.sentAt);
+      respondedAt = optionalUtcTimestamp(value.respondedAt);
       responseAttachment = optionalText(value.responseAttachment);
       cancelReason = optionalText(value.cancelReason);
       preparedEmailBody = optionalText(value.preparedEmailBody);
@@ -178,7 +195,7 @@ export class KnowledgeOperationsService {
       recipient = optionalText(value.recipient);
       subject = optionalText(value.subject);
       objective = optionalText(value.objective);
-      dueAt = optionalText(value.dueAt);
+      dueAt = optionalUtcTimestamp(value.dueAt);
       notes = optionalText(value.notes);
       agenda = optionalText(value.agenda);
       responsible = optionalText(value.responsible);

@@ -99,7 +99,11 @@ export function KnowledgeOperationsTest({ initialGapId = '' }: { initialGapId?: 
     setGaps(body.items);
     setTotal(body.total ?? 0);
     setDispositions(Object.fromEntries(body.items.map(item => [item.id, item.reviewDisposition])));
-    setSelectedId(current => preferredId ?? (current || body.items?.[0]?.id || ''));
+    setSelectedId(current => {
+      if (preferredId && body.items!.some(item => item.id === preferredId)) return preferredId;
+      if (current && body.items!.some(item => item.id === current)) return current;
+      return body.items![0]?.id ?? '';
+    });
   }, [page, appliedFilters]);
 
   const loadDetail = useCallback(async (id: string) => {
@@ -190,12 +194,16 @@ export function KnowledgeOperationsTest({ initialGapId = '' }: { initialGapId?: 
 
   async function setExecution(status: RecoveryActionExecutionStatus) {
     if (!action) return;
+    if (status === 'CANCELLED' && !form.cancelReason.trim()) {
+      setError('Escriba una justificación antes de cancelar la acción.');
+      return;
+    }
     await run('/action', 'PATCH', {
       actionId: action.id,
       executionStatus: status,
       ...(status === 'SENT' ? { sentAt: new Date().toISOString() } : {}),
       ...(status === 'RESPONDED' ? { respondedAt: new Date().toISOString() } : {}),
-      ...(status === 'CANCELLED' ? { cancelReason: form.cancelReason || 'Cancelada por cambio de estrategia.' } : {}),
+      ...(status === 'CANCELLED' ? { cancelReason: form.cancelReason.trim() } : {}),
     });
   }
 
@@ -480,7 +488,7 @@ export function KnowledgeOperationsTest({ initialGapId = '' }: { initialGapId?: 
                     key={status}
                     type="button"
                     className={`status-chip ${action.executionStatus === status ? 'active' : ''}`}
-                    disabled={busy}
+                    disabled={busy || (status === 'CANCELLED' && !form.cancelReason.trim())}
                     onClick={() => void setExecution(status)}
                   >
                     {executionLabels[status]}

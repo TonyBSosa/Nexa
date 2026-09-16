@@ -170,7 +170,7 @@ export class SQLiteKnowledgeRepository implements KnowledgeRepository {
             department,
           };
           const actions: RecoveryAction[] = recoveryProposals(response.suggestedActions).map((action) => (
-            createRecoveryAction(action, randomUUID(), createdAt, context)
+            createRecoveryAction(action, randomUUID(), createdAt, context, {}, true)
           ));
           this.db.prepare(`INSERT INTO knowledge_gaps
             (id, originalQuestion, normalizedQuestionKey, title, category, status, priority, occurrences, evidenceRevision, suggestedDepartment, suggestedExperts, suggestedActions, selectedAction, createdAt, updatedAt)
