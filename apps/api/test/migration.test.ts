@@ -34,9 +34,9 @@ test('schema v6 creates the evidence and draft review structures', () => {
     const shapes = shape(db);
     assert.ok(shapes.draft_reviews, 'draft_reviews debe existir');
     assert.ok(shapes.draft_review_comments, 'draft_review_comments debe existir');
-    assert.ok(shapes.collected_evidence.some(column => column.startsWith('evidenceType ')));
-    assert.ok(shapes.collected_evidence.some(column => column.startsWith('withdrawnAt ')));
-    assert.ok(shapes.approvals.some(column => column.startsWith('actor ')));
+    assert.ok(shapes.collected_evidence!.some(column => column.startsWith('evidenceType ')));
+    assert.ok(shapes.collected_evidence!.some(column => column.startsWith('withdrawnAt ')));
+    assert.ok(shapes.approvals!.some(column => column.startsWith('actor ')));
   } finally {
     db.close();
   }
@@ -69,7 +69,7 @@ test('a version 5 database upgrades to the same shape as a fresh one', () => {
   try {
     assert.equal(upgraded.pragma('user_version', { simple: true }), 6);
     assert.deepEqual(shape(upgraded), expected);
-    const row = upgraded.prepare<[], { content: string; evidenceType: string; contentKind: string; version: number }>(
+    const row = upgraded.prepare<[string], { content: string; evidenceType: string; contentKind: string; version: number }>(
       'SELECT content, evidenceType, contentKind, version FROM collected_evidence WHERE id = ?',
     ).get('ev-1');
     assert.deepEqual(row, { content: 'Texto anterior', evidenceType: 'MANUAL_TEXT', contentKind: 'TEXT', version: 1 });
