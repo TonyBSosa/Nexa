@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import type { ReviewDetail, ReviewMetadata, ReviewDecisionRequest, ReviewFilters, ReviewList } from '@nexa/shared';
+import type {
+  AddDraftCommentRequest, AddEvidenceItemRequest, AssignReviewersRequest, ConfirmChecklistRequest,
+  DraftReviewDetail, ReplaceEvidenceRequest, WithdrawEvidenceRequest,
+} from '@nexa/shared';
 import { ReviewStore } from './review.js';
+import { DraftReviewStore } from './draftReview.js';
 import type {
   ActivityEvent, ActivityEventType, AddActivityRequest, AddEvidenceRequest, Approval, ApprovalRequest,
   ApprovalResult, ApprovedKnowledgeArticle, ChatResponse, CollectedEvidence, CreateManualActionRequest,
@@ -30,6 +35,13 @@ export interface KnowledgeRepository {
   saveReview(id: string, metadata: ReviewMetadata): ReviewDetail;
   decideReview(id: string, request: ReviewDecisionRequest): ReviewDetail;
   confirmReview(id: string, revision: number, actor: string): ReviewDetail;
+  getDraftReview(id: string): DraftReviewDetail;
+  addEvidenceItem(id: string, request: AddEvidenceItemRequest): DraftReviewDetail;
+  withdrawEvidence(id: string, evidenceId: string, request: WithdrawEvidenceRequest): DraftReviewDetail;
+  replaceEvidence(id: string, evidenceId: string, request: ReplaceEvidenceRequest): DraftReviewDetail;
+  confirmChecklist(id: string, request: ConfirmChecklistRequest): DraftReviewDetail;
+  assignReviewers(id: string, request: AssignReviewersRequest): DraftReviewDetail;
+  addDraftComment(id: string, request: AddDraftCommentRequest): DraftReviewDetail;
   record(message: string, response: ChatResponse, gapEligible: boolean, clientSessionId?: string): Query;
   listQueries(): Query[];
   listGaps(status?: KnowledgeGapStatus): KnowledgeGap[];
@@ -83,6 +95,14 @@ export class SQLiteKnowledgeRepository implements KnowledgeRepository {
   constructor(private readonly db: Database.Database, private readonly now: () => Date = () => new Date()) {}
 
   private get reviews() { return new ReviewStore(this.db, this.now); }
+  private get draftReviews() { return new DraftReviewStore(this.db, this.now); }
+  getDraftReview(id: string): DraftReviewDetail { return this.guard(() => this.draftReviews.detail(id)); }
+  addEvidenceItem(id: string, request: AddEvidenceItemRequest): DraftReviewDetail { return this.guard(() => this.draftReviews.addEvidence(id, request)); }
+  withdrawEvidence(id: string, evidenceId: string, request: WithdrawEvidenceRequest): DraftReviewDetail { return this.guard(() => this.draftReviews.withdrawEvidence(id, evidenceId, request)); }
+  replaceEvidence(id: string, evidenceId: string, request: ReplaceEvidenceRequest): DraftReviewDetail { return this.guard(() => this.draftReviews.replaceEvidence(id, evidenceId, request)); }
+  confirmChecklist(id: string, request: ConfirmChecklistRequest): DraftReviewDetail { return this.guard(() => this.draftReviews.confirmChecklist(id, request.revision, request.confirmations)); }
+  assignReviewers(id: string, request: AssignReviewersRequest): DraftReviewDetail { return this.guard(() => this.draftReviews.assignReviewers(id, request.revision, request.submittedBy, request.reviewers)); }
+  addDraftComment(id: string, request: AddDraftCommentRequest): DraftReviewDetail { return this.guard(() => this.draftReviews.addComment(id, request)); }
   getReview(id: string): ReviewDetail { return this.guard(() => this.reviews.detail(id)); }
   saveReview(id: string, metadata: ReviewMetadata): ReviewDetail { return this.guard(() => this.reviews.save(id, metadata)); }
   decideReview(id: string, request: ReviewDecisionRequest): ReviewDetail { return this.guard(() => this.reviews.decide(id, request)); }
