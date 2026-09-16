@@ -106,7 +106,7 @@ export function validateHttpUrl(value: unknown, name: string): string {
 export function validateFileMetadata(type: EvidenceType, input: unknown): EvidenceFileMetadata {
   const rules = fileRules[type];
   if (!rules) return invalidRequest(`El tipo ${type} no admite archivos.`);
-  const value = requireObject(input, ['fileName', 'mimeType', 'sizeBytes']);
+  const value = requireObject(input, ['fileName', 'mimeType', 'sizeBytes', 'content']);
   const fileName = requireText(value.fileName, 'fileName', limits.fileName);
   if (/[/\\]/.test(fileName) || /^\.+$/.test(fileName) || [...fileName].some((character) => character.charCodeAt(0) < 32)) {
     return invalidRequest('fileName no es válido.');
@@ -119,6 +119,29 @@ export function validateFileMetadata(type: EvidenceType, input: unknown): Eviden
   const sizeBytes = requirePositiveInteger(value.sizeBytes, 'sizeBytes');
   if (sizeBytes > rules.maxBytes) return invalidRequest(`El archivo supera ${rules.maxBytes / megabyte} MB.`);
   return { fileName, mimeType, sizeBytes };
+}
+
+const base64Pattern = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/**
+ * Decodes the base64 payload that travels with the file metadata. Node's base64
+ * decoder silently skips invalid characters, so the character set is checked
+ * first and the declared size must match the decoded length exactly.
+ */
+export function decodeFileContent(metadata: EvidenceFileMetadata, input: unknown): Buffer {
+  const value = requireObject(input, ['fileName', 'mimeType', 'sizeBytes', 'content']);
+  if (typeof value.content !== 'string' || !value.content) {
+    return invalidRequest('El archivo debe incluir su contenido en base64.');
+  }
+  const content = value.content.replace(/\s+/g, '');
+  if (!base64Pattern.test(content) || content.length % 4 !== 0) {
+    return invalidRequest('El contenido del archivo no es base64 válido.');
+  }
+  const bytes = Buffer.from(content, 'base64');
+  if (bytes.byteLength !== metadata.sizeBytes) {
+    return invalidRequest(`El contenido del archivo no coincide con sizeBytes (${metadata.sizeBytes}).`);
+  }
+  return bytes;
 }
 
 function meetingDetails(input: unknown): MeetingDetails {

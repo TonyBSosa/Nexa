@@ -15,6 +15,11 @@ export interface EvidenceFileMetadata {
   sizeBytes: number;
 }
 
+/** Metadata plus the base64 bytes, used when adding or replacing a file. */
+export interface EvidenceFileUpload extends EvidenceFileMetadata {
+  content: string;
+}
+
 export interface MeetingDetails {
   participants: string[];
   summary: string;
@@ -163,7 +168,7 @@ export interface AddEvidenceItemRequest {
   note?: string | null;
   content?: string | null;
   url?: string | null;
-  file?: EvidenceFileMetadata | null;
+  file?: EvidenceFileUpload | null;
   meeting?: MeetingDetails | null;
 }
 
@@ -175,7 +180,7 @@ export interface WithdrawEvidenceRequest {
 export interface ReplaceEvidenceRequest {
   actor: string;
   reason: string;
-  file: EvidenceFileMetadata;
+  file: EvidenceFileUpload;
 }
 
 export interface AddDraftCommentRequest {

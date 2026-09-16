@@ -6,10 +6,11 @@ import type {
 } from '@nexa/shared';
 import { randomUUID } from 'node:crypto';
 import { evaluateReviewChecklist } from '../domain/reviewChecklist.js';
-import { validateNewEvidence, validateReplacement, validateWithdrawal } from '../domain/evidenceValidation.js';
+import { decodeFileContent, validateNewEvidence, validateReplacement, validateWithdrawal } from '../domain/evidenceValidation.js';
 import { normalizeActor, validateContentComment, validateReviewerAssignment } from '../domain/reviewRules.js';
 import { diffDraftRevisions } from '../domain/revisionDiff.js';
 import { DomainError, assertEvidenceAllowed } from '../domain/workflow.js';
+import type { EvidenceFileStore } from '../persistence/fileStore.js';
 
 interface GapRow {
   id: string;
@@ -62,7 +63,7 @@ const noConfirmations: ChecklistConfirmations = {
   answerClear: false, noImproperConfidentialInfo: false, readyForReview: false,
 };
 
-/** Evidence files are recorded, not stored; these paths serve the metadata only. */
+/** Endpoints that serve the stored bytes for viewing and downloading. */
 function fileLinks(gapId: string, evidenceId: string) {
   return {
     viewUrl: `/api/knowledge-gaps/${gapId}/evidence/${evidenceId}/file`,
@@ -98,7 +99,11 @@ function toEvidenceItem(row: EvidenceRow): EvidenceItem {
 }
 
 export class DraftReviewStore {
-  constructor(private readonly db: Database.Database, private readonly now: () => Date) {}
+  constructor(
+    private readonly db: Database.Database,
+    private readonly now: () => Date,
+    private readonly files: EvidenceFileStore,
+  ) {}
 
   private gap(id: string): GapRow {
     const gap = this.db.prepare<[string], GapRow>('SELECT id, status, evidenceRevision FROM knowledge_gaps WHERE id = ?').get(id);
@@ -213,10 +218,24 @@ export class DraftReviewStore {
   }
 
   addEvidence(id: string, input: AddEvidenceItemRequest): DraftReviewDetail {
+    const gap = this.gap(id);
+    assertEvidenceAllowed(gap.status);
+    const evidence = validateNewEvidence(input, this.now());
+    const evidenceId = randomUUID();
+    // Bytes are written first; the database transaction below undoes the file if
+    // it fails, because the file system takes no part in the transaction.
+    const bytes = evidence.file ? decodeFileContent(evidence.file, (input as { file?: unknown }).file) : null;
+    if (bytes) this.files.write(id, evidenceId, bytes);
+    try {
+      return this.insertEvidence(id, evidenceId, evidence);
+    } catch (error) {
+      if (bytes) this.files.remove(id, evidenceId);
+      throw error;
+    }
+  }
+
+  private insertEvidence(id: string, evidenceId: string, evidence: ReturnType<typeof validateNewEvidence>): DraftReviewDetail {
     return this.db.transaction(() => {
-      const gap = this.gap(id);
-      assertEvidenceAllowed(gap.status);
-      const evidence = validateNewEvidence(input, this.now());
       const createdAt = this.now().toISOString();
       const revision = this.bumpEvidenceRevision(id, createdAt);
       this.db.prepare(`INSERT INTO collected_evidence
@@ -226,7 +245,7 @@ export class DraftReviewStore {
         VALUES (@id, @knowledgeGapId, @content, 'MANUAL', @sourceLabel, @reference, @revision, @createdAt,
          @evidenceType, @contentKind, @author, @evidenceDate, @note, @url, @fileName, @mimeType, @sizeBytes,
          @meeting, 1, NULL, NULL, NULL, NULL)`).run({
-        id: randomUUID(), knowledgeGapId: id, content: evidence.content ?? '',
+        id: evidenceId, knowledgeGapId: id, content: evidence.content ?? '',
         sourceLabel: evidence.source, reference: evidence.reference, revision, createdAt,
         evidenceType: evidence.type, contentKind: evidence.contentKind, author: evidence.author,
         evidenceDate: evidence.evidenceDate, note: evidence.note, url: evidence.url,
@@ -270,14 +289,28 @@ export class DraftReviewStore {
   }
 
   replaceEvidence(id: string, evidenceId: string, input: ReplaceEvidenceRequest): DraftReviewDetail {
+    const gap = this.gap(id);
+    assertEvidenceAllowed(gap.status);
+    const row = this.currentEvidence(id, evidenceId);
+    const replacement = validateReplacement(this.versionState(row), input);
+    const replacementId = randomUUID();
+    const bytes = decodeFileContent(replacement.file, (input as { file?: unknown }).file);
+    this.files.write(id, replacementId, bytes);
+    try {
+      return this.insertReplacement(id, evidenceId, replacementId, row, replacement);
+    } catch (error) {
+      this.files.remove(id, replacementId);
+      throw error;
+    }
+  }
+
+  private insertReplacement(
+    id: string, evidenceId: string, replacementId: string,
+    row: EvidenceRow, replacement: ReturnType<typeof validateReplacement>,
+  ): DraftReviewDetail {
     return this.db.transaction(() => {
-      const gap = this.gap(id);
-      assertEvidenceAllowed(gap.status);
-      const row = this.currentEvidence(id, evidenceId);
-      const replacement = validateReplacement(this.versionState(row), input);
       const createdAt = this.now().toISOString();
       const revision = this.bumpEvidenceRevision(id, createdAt);
-      const replacementId = randomUUID();
       this.db.prepare(`INSERT INTO collected_evidence
         (id, knowledgeGapId, content, sourceType, sourceLabel, reference, revision, createdAt, evidenceType,
          contentKind, author, evidenceDate, note, url, fileName, mimeType, sizeBytes, meeting, version,
@@ -336,6 +369,14 @@ export class DraftReviewStore {
           comment.quote, comment.body, this.now().toISOString());
       return this.detail(id);
     }).immediate();
+  }
+
+  /** Bytes plus the name and type the browser needs to display or save them. */
+  readFile(id: string, evidenceId: string) {
+    this.gap(id);
+    const row = this.currentEvidence(id, evidenceId);
+    if (!row.fileName || !row.mimeType) throw new DomainError('NOT_FOUND', 'Esta evidencia no tiene archivo.');
+    return { bytes: this.files.read(id, evidenceId), fileName: row.fileName, mimeType: row.mimeType };
   }
 
   /** Context for the domain decision rules, read by the knowledge repository during approval. */

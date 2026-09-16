@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { AddressInfo } from 'node:net';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { DraftReviewDetail } from '@nexa/shared';
 import { createApp } from '../src/app.js';
 import { openDatabase } from '../src/persistence/database.js';
+import { EvidenceFileStore } from '../src/persistence/fileStore.js';
 import { SQLiteKnowledgeRepository } from '../src/repositories/knowledge.js';
 import { FakeAgentProvider } from '../src/integrations/agent/FakeAgentProvider.js';
 
@@ -11,13 +15,16 @@ const collected = '2026-09-10';
 
 function harness() {
   const db = openDatabase(':memory:');
-  const repository = new SQLiteKnowledgeRepository(db);
+  // A temporary uploads root keeps the tests away from the repository data directory.
+  const uploads = mkdtempSync(join(tmpdir(), 'nexa-uploads-'));
+  const repository = new SQLiteKnowledgeRepository(db, () => new Date(), new EvidenceFileStore(uploads));
   const app = createApp(new FakeAgentProvider(), repository);
   const server = app.listen(0);
   const port = (server.address() as AddressInfo).port;
   const base = `http://127.0.0.1:${port}/api`;
+  const origin = `http://127.0.0.1:${port}`;
   return {
-    db, repository, base,
+    db, repository, base, uploads, origin,
     async call(path: string, method = 'GET', body?: unknown) {
       const response = await fetch(base + path, {
         method,
@@ -25,7 +32,7 @@ function harness() {
       });
       return { status: response.status, body: await response.json() as Record<string, unknown> };
     },
-    close() { server.close(); db.close(); },
+    close() { server.close(); db.close(); rmSync(uploads, { recursive: true, force: true }); },
   };
 }
 
@@ -259,6 +266,146 @@ test('assigned reviewers decide with attribution and a gap without them keeps th
     assert.equal(history.length, 1);
     assert.equal(history[0]!.actor, 'carmen rivas');
     assert.equal(history[0]!.decision, 'APPROVED');
+  } finally {
+    context.close();
+  }
+});
+
+const pdfBytes = Buffer.from('%PDF-1.4\nacta de baja sintetica\n%%EOF\n', 'utf8');
+
+function pdfUpload(fileName = 'acta-baja.pdf') {
+  return { fileName, mimeType: 'application/pdf', sizeBytes: pdfBytes.byteLength, content: pdfBytes.toString('base64') };
+}
+
+async function addPdf(context: ReturnType<typeof harness>, id: string, fileName?: string) {
+  const created = await context.call(`/knowledge-gaps/${id}/evidence-items`, 'POST', {
+    type: 'PDF', source: 'Gestion de Activos (sintetica)', author: 'Ana Documentación',
+    evidenceDate: collected, file: pdfUpload(fileName),
+  });
+  assert.equal(created.status, 201);
+  return (created.body as unknown as DraftReviewDetail).evidence.at(-1)!;
+}
+
+test('file evidence stores its bytes and serves them for viewing and downloading', async () => {
+  const context = harness();
+  try {
+    const id = gapInProgress(context.db);
+    const item = await addPdf(context, id);
+    assert.equal(item.file?.fileName, 'acta-baja.pdf');
+    assert.equal(item.file?.sizeBytes, pdfBytes.byteLength);
+    // The bytes landed under the gap directory, named by the evidence id.
+    assert.deepEqual(readFileSync(join(context.uploads, id, item.id)), pdfBytes);
+
+    const view = await fetch(context.origin + item.file!.viewUrl);
+    assert.equal(view.status, 200);
+    assert.equal(view.headers.get('content-type'), 'application/pdf');
+    assert.equal(view.headers.get('x-content-type-options'), 'nosniff');
+    assert.match(view.headers.get('content-disposition') ?? '', /^inline; filename/);
+    assert.deepEqual(Buffer.from(await view.arrayBuffer()), pdfBytes);
+
+    const download = await fetch(context.origin + item.file!.downloadUrl);
+    assert.equal(download.status, 200);
+    assert.match(download.headers.get('content-disposition') ?? '', /^attachment; /);
+    assert.deepEqual(Buffer.from(await download.arrayBuffer()), pdfBytes);
+  } finally {
+    context.close();
+  }
+});
+
+test('file content is validated and a rejected upload leaves no orphan file', async () => {
+  const context = harness();
+  try {
+    const id = gapInProgress(context.db);
+    const base = {
+      type: 'PDF', source: 'Gestion de Activos', author: 'Ana Documentación', evidenceDate: collected,
+    };
+
+    // sizeBytes must match the decoded length exactly.
+    const mismatched = await context.call(`/knowledge-gaps/${id}/evidence-items`, 'POST', {
+      ...base, file: { ...pdfUpload(), sizeBytes: pdfBytes.byteLength + 10 },
+    });
+    assert.equal(mismatched.status, 400);
+
+    // Node's base64 decoder skips invalid characters, so they are rejected first.
+    const notBase64 = await context.call(`/knowledge-gaps/${id}/evidence-items`, 'POST', {
+      ...base, file: { ...pdfUpload(), content: 'no-es-base64-valido!!' },
+    });
+    assert.equal(notBase64.status, 400);
+
+    const missingContent = await context.call(`/knowledge-gaps/${id}/evidence-items`, 'POST', {
+      ...base, file: { fileName: 'acta.pdf', mimeType: 'application/pdf', sizeBytes: pdfBytes.byteLength },
+    });
+    assert.equal(missingContent.status, 400);
+
+    assert.equal(existsSync(join(context.uploads, id)), false, 'ninguna solicitud rechazada deja archivos');
+  } finally {
+    context.close();
+  }
+});
+
+test('replacing file evidence stores the new bytes and keeps the superseded version', async () => {
+  const context = harness();
+  try {
+    const id = gapInProgress(context.db);
+    const original = await addPdf(context, id, 'acta-v1.pdf');
+
+    const corregido = Buffer.from('%PDF-1.4\nacta corregida con anexo de firmas\n%%EOF\n', 'utf8');
+    const replaced = await context.call(`/knowledge-gaps/${id}/evidence/${original.id}/replace`, 'POST', {
+      actor: 'Carmen Rivas', reason: 'Se corrigio el anexo de firmas.',
+      file: {
+        fileName: 'acta-v2.pdf', mimeType: 'application/pdf',
+        sizeBytes: corregido.byteLength, content: corregido.toString('base64'),
+      },
+    });
+    assert.equal(replaced.status, 200);
+    const items = (replaced.body as unknown as DraftReviewDetail).evidence;
+    const anterior = items.find(entry => entry.id === original.id)!;
+    const vigente = items.find(entry => entry.version === 2)!;
+    assert.equal(anterior.supersededBy, vigente.id);
+    assert.equal(vigente.file?.fileName, 'acta-v2.pdf');
+
+    // Both versions keep their own bytes, so the history stays readable.
+    assert.deepEqual(readFileSync(join(context.uploads, id, original.id)), pdfBytes);
+    assert.deepEqual(readFileSync(join(context.uploads, id, vigente.id)), corregido);
+    const antiguo = await fetch(context.origin + anterior.file!.viewUrl);
+    assert.deepEqual(Buffer.from(await antiguo.arrayBuffer()), pdfBytes);
+
+    // Only file evidence can be replaced.
+    const texto = await context.call(`/knowledge-gaps/${id}/evidence-items`, 'POST', {
+      type: 'MANUAL_TEXT', source: 'Soporte de TI', author: 'Ana Documentación',
+      evidenceDate: collected, content: 'Nota de texto.',
+    });
+    const notaId = (texto.body as unknown as DraftReviewDetail).evidence.at(-1)!.id;
+    const rechazado = await context.call(`/knowledge-gaps/${id}/evidence/${notaId}/replace`, 'POST', {
+      actor: 'Carmen Rivas', reason: 'Intento sobre evidencia de texto.',
+      file: { fileName: 'x.pdf', mimeType: 'application/pdf', sizeBytes: pdfBytes.byteLength, content: pdfBytes.toString('base64') },
+    });
+    assert.equal(rechazado.status, 409);
+  } finally {
+    context.close();
+  }
+});
+
+test('evidence without a file and unknown identifiers cannot be served', async () => {
+  const context = harness();
+  try {
+    const id = gapInProgress(context.db);
+    const created = await context.call(`/knowledge-gaps/${id}/evidence-items`, 'POST', {
+      type: 'MANUAL_TEXT', source: 'Soporte de TI (sintetico)', author: 'Ana Documentación',
+      evidenceDate: collected, content: 'Evidencia de texto sin archivo.',
+    });
+    const item = (created.body as unknown as DraftReviewDetail).evidence[0]!;
+    assert.equal(item.file, null);
+
+    const sinArchivo = await fetch(`${context.base}/knowledge-gaps/${id}/evidence/${item.id}/file`);
+    assert.equal(sinArchivo.status, 404);
+
+    const desconocida = await fetch(`${context.base}/knowledge-gaps/${id}/evidence/no-existe/file`);
+    assert.equal(desconocida.status, 404);
+
+    // A traversal attempt never reaches the file system.
+    const traversal = await fetch(`${context.base}/knowledge-gaps/${id}/evidence/${encodeURIComponent('../../nexa.db')}/file`);
+    assert.ok(traversal.status === 400 || traversal.status === 404, `estado inesperado ${traversal.status}`);
   } finally {
     context.close();
   }

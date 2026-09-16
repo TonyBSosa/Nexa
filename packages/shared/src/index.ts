@@ -30,7 +30,7 @@ export type { GapReview, ReviewDetail, ReviewEvent, ReviewMetadata, ReviewDecisi
 
 export { evidenceTypes, reviewChecklistKeys } from './draftReview.js';
 export type {
-  EvidenceType, EvidenceContentKind, EvidenceFileMetadata, MeetingDetails,
+  EvidenceType, EvidenceContentKind, EvidenceFileMetadata, EvidenceFileUpload, MeetingDetails,
   EvidenceWithdrawalRecord, EvidenceItem, DiffLine, DiffLineType, LineDiff, DraftRevisionDiff,
   ReviewChecklistKey, ReviewChecklistItem, ReviewChecklistResult, ChecklistConfirmations,
   DraftReviewDecision, DecisionHistoryEntry, DraftReviewComment, DraftReviewState, DraftReviewDetail,

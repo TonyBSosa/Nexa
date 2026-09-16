@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ChecklistConfirmations, DraftReviewDetail, KnowledgeGapDetail } from '@nexa/shared';
+import type { ChecklistConfirmations, DraftReviewDetail, EvidenceItem, EvidenceType, KnowledgeGapDetail } from '@nexa/shared';
 import { DecisionHistory } from './DecisionHistory';
 import { EvidenceList } from './EvidenceList';
 import { RevisionDiffView } from './RevisionDiffView';
@@ -11,6 +11,23 @@ const confirmationLabels: Array<[keyof ChecklistConfirmations, string]> = [
   ['readyForReview', 'Está lista para revisión'],
 ];
 
+
+/** File-backed evidence types and the accept filter each one offers. */
+const fileTypes: Array<[EvidenceType, string, string]> = [
+  ['PDF', 'PDF', '.pdf'],
+  ['DOCUMENT', 'Documento', '.doc,.docx,.xlsx,.pptx,.odt,.txt,.md'],
+  ['IMAGE', 'Imagen', '.png,.jpg,.jpeg,.webp,.gif'],
+  ['VIDEO', 'Video', '.mp4,.webm'],
+];
+
+/** The API takes the bytes as base64 alongside the metadata. */
+async function readAsUpload(file: File) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return { fileName: file.name, mimeType: file.type, sizeBytes: bytes.byteLength, content: btoa(binary) };
+}
+
 export function DraftReviewPanel({ gap, refresh }: { gap: KnowledgeGapDetail; refresh: () => Promise<void> }) {
   const [detail, setDetail] = useState<DraftReviewDetail | null>(null);
   const [error, setError] = useState('');
@@ -18,6 +35,12 @@ export function DraftReviewPanel({ gap, refresh }: { gap: KnowledgeGapDetail; re
   const [actor, setActor] = useState('');
   const [comment, setComment] = useState('');
   const [reviewers, setReviewers] = useState('');
+  const [fileType, setFileType] = useState<EvidenceType>('PDF');
+  const [fileSource, setFileSource] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [replacing, setReplacing] = useState<EvidenceItem | null>(null);
+  const [replacementFile, setReplacementFile] = useState<File | null>(null);
+  const [reason, setReason] = useState('');
   const [reload, setReload] = useState(0);
 
   useEffect(() => {
@@ -33,7 +56,7 @@ export function DraftReviewPanel({ gap, refresh }: { gap: KnowledgeGapDetail; re
     return () => controller.abort();
   }, [gap.id, gap.updatedAt, reload]);
 
-  const send = useCallback(async (path: string, body: object) => {
+  const send = useCallback(async (path: string, body: object, expected = 200) => {
     setBusy(true);
     setError('');
     try {
@@ -41,7 +64,7 @@ export function DraftReviewPanel({ gap, refresh }: { gap: KnowledgeGapDetail; re
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       const result = await response.json() as { error?: { message: string } };
-      if (!response.ok) throw new Error(result.error?.message || 'No se completó la operación.');
+      if (response.status !== expected) throw new Error(result.error?.message || 'No se completó la operación.');
       await refresh();
       setReload(value => value + 1);
     } catch (reason) {
@@ -50,6 +73,26 @@ export function DraftReviewPanel({ gap, refresh }: { gap: KnowledgeGapDetail; re
       setBusy(false);
     }
   }, [gap.id, refresh]);
+
+  async function uploadEvidence() {
+    if (!file) return;
+    await send('/evidence-items', {
+      type: fileType, source: fileSource, author: actor,
+      evidenceDate: new Date().toISOString().slice(0, 10),
+      file: await readAsUpload(file),
+    }, 201);
+    setFile(null);
+  }
+
+  async function replaceEvidence() {
+    if (!replacing || !replacementFile) return;
+    await send(`/evidence/${replacing.id}/replace`, {
+      actor, reason, file: await readAsUpload(replacementFile),
+    });
+    setReplacing(null);
+    setReplacementFile(null);
+    setReason('');
+  }
 
   if (!detail) {
     return <div role={error ? 'alert' : 'status'}>{error || 'Cargando revisión del borrador…'}</div>;
@@ -72,7 +115,60 @@ export function DraftReviewPanel({ gap, refresh }: { gap: KnowledgeGapDetail; re
     {error && <p className="inline-error" role="alert">{error}</p>}
 
     <h4>Evidencia recopilada ({detail.evidence.filter(item => item.supersededBy === null).length})</h4>
-    <EvidenceList items={detail.evidence} />
+    <EvidenceList items={detail.evidence} {...(collecting ? { onReplace: setReplacing } : {})} />
+
+    {collecting && <div className="kr-upload">
+      <h4>Agregar un archivo como evidencia</h4>
+      <label>Tipo
+        <select value={fileType} disabled={busy} onChange={event => setFileType(event.target.value as EvidenceType)}>
+          {fileTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+      </label>
+      <label>Fuente
+        <input value={fileSource} onChange={event => setFileSource(event.target.value)} maxLength={200} disabled={busy} />
+      </label>
+      <label>Quién lo aporta
+        <input value={actor} onChange={event => setActor(event.target.value)} maxLength={120} disabled={busy} />
+      </label>
+      <label>Archivo
+        <input
+          type="file"
+          accept={fileTypes.find(([value]) => value === fileType)?.[2]}
+          disabled={busy}
+          onChange={event => setFile(event.target.files?.[0] ?? null)}
+        />
+      </label>
+      <p className="muted-copy">PDF y documentos hasta 10 MB, imágenes 5 MB, video 25 MB.</p>
+      <button
+        className="button secondary"
+        disabled={busy || !file || !fileSource.trim() || !actor.trim()}
+        onClick={() => void uploadEvidence()}
+      >Adjuntar archivo</button>
+    </div>}
+
+    {replacing && <div className="kr-upload">
+      <h4>Reemplazar el archivo de una evidencia</h4>
+      <p className="muted-copy">
+        Se conserva la versión anterior y la nueva queda como versión {replacing.version + 1}.
+      </p>
+      <label>Quién lo reemplaza
+        <input value={actor} onChange={event => setActor(event.target.value)} maxLength={120} disabled={busy} />
+      </label>
+      <label>Motivo
+        <textarea value={reason} onChange={event => setReason(event.target.value)} maxLength={2000} disabled={busy} />
+      </label>
+      <label>Archivo nuevo
+        <input type="file" disabled={busy} onChange={event => setReplacementFile(event.target.files?.[0] ?? null)} />
+      </label>
+      <div className="workflow-controls">
+        <button
+          className="button primary"
+          disabled={busy || !replacementFile || !reason.trim() || !actor.trim()}
+          onClick={() => void replaceEvidence()}
+        >Confirmar reemplazo</button>
+        <button className="button secondary" disabled={busy} onClick={() => setReplacing(null)}>Cancelar</button>
+      </div>
+    </div>}
 
     {(collecting || deciding) && <>
       <h4>Lista de verificación</h4>

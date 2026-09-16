@@ -35,7 +35,12 @@ function EvidenceBody({ item }: { item: EvidenceItem }) {
   </>;
 }
 
-export function EvidenceList({ items, showSuperseded = false }: { items: EvidenceItem[]; showSuperseded?: boolean }) {
+export function EvidenceList({ items, showSuperseded = false, onReplace, onWithdraw }: {
+  items: EvidenceItem[];
+  showSuperseded?: boolean;
+  onReplace?: (item: EvidenceItem) => void;
+  onWithdraw?: (item: EvidenceItem) => void;
+}) {
   const visible = showSuperseded ? items : items.filter((item) => item.supersededBy === null);
   if (!visible.length) return <p className="kr-empty">Todavía no hay evidencia registrada.</p>;
   return <ul className="kr-evidence-list">
@@ -53,6 +58,10 @@ export function EvidenceList({ items, showSuperseded = false }: { items: Evidenc
       <EvidenceBody item={item} />
       {item.note && <p className="kr-note"><span className="context-label">Nota</span>{item.note}</p>}
       {item.withdrawal && <p className="kr-note"><span className="context-label">Retirada por {item.withdrawal.actor}</span>{item.withdrawal.justification}</p>}
+      {!item.withdrawal && !item.supersededBy && (onReplace || onWithdraw) && <div className="kr-evidence-actions">
+        {onReplace && item.file && <button type="button" className="button secondary" onClick={() => onReplace(item)}>Reemplazar archivo</button>}
+        {onWithdraw && <button type="button" className="button secondary" onClick={() => onWithdraw(item)}>Retirar</button>}
+      </div>}
     </li>)}
   </ul>;
 }

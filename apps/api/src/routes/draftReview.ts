@@ -78,6 +78,20 @@ export function createDraftReviewRouter(repository: KnowledgeRepository) {
     } catch (error) { next(error); }
   });
 
+  router.get('/knowledge-gaps/:id/evidence/:evidenceId/file', (request, response, next) => {
+    try {
+      const file = repository.readEvidenceFile(request.params.id, request.params.evidenceId);
+      const disposition = request.query.download === undefined ? 'inline' : 'attachment';
+      // The stored bytes are user-supplied, so the browser must neither sniff a
+      // different type nor let the file load anything of its own.
+      response.setHeader('Content-Type', file.mimeType);
+      response.setHeader('X-Content-Type-Options', 'nosniff');
+      response.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+      response.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(file.fileName)}`);
+      response.send(file.bytes);
+    } catch (error) { next(error); }
+  });
+
   router.post('/knowledge-gaps/:id/draft-review/comments', (request, response, next) => {
     try {
       response.status(201).json(repository.addDraftComment(request.params.id, request.body));
