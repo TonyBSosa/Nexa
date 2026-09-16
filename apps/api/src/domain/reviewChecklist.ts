@@ -1,9 +1,11 @@
+import type { ChecklistConfirmations, ReviewChecklistItem, ReviewChecklistKey, ReviewChecklistResult } from '@nexa/shared';
+import { reviewChecklistKeys } from '@nexa/shared';
 import { DomainError } from './workflow.js';
 
-export const reviewChecklistKeys = [
-  'HAS_EVIDENCE', 'SOURCES_IDENTIFIED', 'ANSWER_CLEAR', 'NO_IMPROPER_CONFIDENTIAL_INFO', 'READY_FOR_REVIEW',
-] as const;
-export type ReviewChecklistKey = typeof reviewChecklistKeys[number];
+export { reviewChecklistKeys };
+export type {
+  ChecklistConfirmations, ReviewChecklistKey, ReviewChecklistItem, ReviewChecklistResult,
+} from '@nexa/shared';
 
 export interface ChecklistEvidence {
   id: string;
@@ -17,29 +19,10 @@ export interface ChecklistDraft {
   citedEvidenceIds: string[];
 }
 
-export interface ChecklistConfirmations {
-  answerClear: boolean;
-  noImproperConfidentialInfo: boolean;
-  readyForReview: boolean;
-}
-
 export interface ReviewChecklistInput {
   evidence: ChecklistEvidence[];
   draft: ChecklistDraft | null;
   confirmations: ChecklistConfirmations;
-}
-
-export interface ReviewChecklistItem {
-  key: ReviewChecklistKey;
-  label: string;
-  kind: 'AUTOMATIC' | 'CONFIRMATION';
-  satisfied: boolean;
-  reason: string | null;
-}
-
-export interface ReviewChecklistResult {
-  items: ReviewChecklistItem[];
-  complete: boolean;
 }
 
 const labels: Record<ReviewChecklistKey, string> = {

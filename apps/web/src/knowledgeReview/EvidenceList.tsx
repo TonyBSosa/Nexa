@@ -1,8 +1,8 @@
 import { Download, ExternalLink, Eye, FileText, Users } from 'lucide-react';
-import type { EvidenceListItem, EvidenceTypeView } from './types';
+import type { EvidenceItem, EvidenceType } from '@nexa/shared';
 import './knowledgeReview.css';
 
-const typeLabels: Record<EvidenceTypeView, string> = {
+const typeLabels: Record<EvidenceType, string> = {
   MANUAL_TEXT: 'Texto manual', MEETING_NOTES: 'Notas de reunión', TRANSCRIPT: 'Transcripción',
   PDF: 'PDF', DOCUMENT: 'Documento', IMAGE: 'Imagen', LINK: 'Enlace', VIDEO: 'Video',
   VIDEO_LINK: 'Enlace a video', SNIPPET: 'Fragmento de script o procedimiento',
@@ -14,7 +14,7 @@ function formatSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function EvidenceBody({ item }: { item: EvidenceListItem }) {
+function EvidenceBody({ item }: { item: EvidenceItem }) {
   return <>
     {item.content && <p className="kr-text-block">{item.content}</p>}
     {item.url && <a className="kr-link" href={item.url} target="_blank" rel="noopener noreferrer"><ExternalLink size={13} />{item.url}</a>}
@@ -35,7 +35,7 @@ function EvidenceBody({ item }: { item: EvidenceListItem }) {
   </>;
 }
 
-export function EvidenceList({ items, showSuperseded = false }: { items: EvidenceListItem[]; showSuperseded?: boolean }) {
+export function EvidenceList({ items, showSuperseded = false }: { items: EvidenceItem[]; showSuperseded?: boolean }) {
   const visible = showSuperseded ? items : items.filter((item) => item.supersededBy === null);
   if (!visible.length) return <p className="kr-empty">Todavía no hay evidencia registrada.</p>;
   return <ul className="kr-evidence-list">

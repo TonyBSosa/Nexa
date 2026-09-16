@@ -27,3 +27,13 @@ export type {
 
 export type { DashboardSummary, AnalyticsSummary } from './analytics.js';
 export type { GapReview, ReviewDetail, ReviewEvent, ReviewMetadata, ReviewDecisionRequest, ReviewDecision, ReviewDisposition, ReviewList, ReviewFilters, SensitivityLevel } from './review.js';
+
+export { evidenceTypes, reviewChecklistKeys } from './draftReview.js';
+export type {
+  EvidenceType, EvidenceContentKind, EvidenceFileMetadata, MeetingDetails,
+  EvidenceWithdrawalRecord, EvidenceItem, DiffLine, DiffLineType, LineDiff, DraftRevisionDiff,
+  ReviewChecklistKey, ReviewChecklistItem, ReviewChecklistResult, ChecklistConfirmations,
+  DraftReviewDecision, DecisionHistoryEntry, DraftReviewComment, DraftReviewState, DraftReviewDetail,
+  AssignReviewersRequest, ConfirmChecklistRequest, AddEvidenceItemRequest,
+  WithdrawEvidenceRequest, ReplaceEvidenceRequest, AddDraftCommentRequest,
+} from './draftReview.js';

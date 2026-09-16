@@ -1,28 +1,13 @@
+import type { EvidenceContentKind, EvidenceFileMetadata, EvidenceType, MeetingDetails } from '@nexa/shared';
+import { evidenceTypes } from '@nexa/shared';
 import {
   invalidRequest, optionalText, requireObject, requirePositiveInteger, requireText, requireTextList,
 } from './inputValidation.js';
 import { normalizeActor } from './reviewRules.js';
 import { DomainError } from './workflow.js';
 
-export const evidenceTypes = [
-  'MANUAL_TEXT', 'MEETING_NOTES', 'TRANSCRIPT', 'PDF', 'DOCUMENT', 'IMAGE', 'LINK', 'VIDEO', 'VIDEO_LINK', 'SNIPPET',
-] as const;
-export type EvidenceType = typeof evidenceTypes[number];
-export type EvidenceContentKind = 'TEXT' | 'MEETING' | 'FILE' | 'URL';
-
-export interface EvidenceFileMetadata {
-  fileName: string;
-  mimeType: string;
-  sizeBytes: number;
-}
-
-export interface MeetingDetails {
-  participants: string[];
-  summary: string;
-  agreements: string[];
-  transcript: string | null;
-  recordingUrl: string | null;
-}
+export { evidenceTypes } from '@nexa/shared';
+export type { EvidenceType, EvidenceContentKind, EvidenceFileMetadata, MeetingDetails } from '@nexa/shared';
 
 export interface NewEvidence {
   type: EvidenceType;

@@ -1,29 +1,8 @@
-import type { KnowledgeDraft } from '@nexa/shared';
+import type { DiffLine, DraftRevisionDiff, KnowledgeDraft, LineDiff } from '@nexa/shared';
 
-export type DiffLineType = 'EQUAL' | 'ADDED' | 'REMOVED';
-
-export interface DiffLine {
-  type: DiffLineType;
-  text: string;
-  beforeLine: number | null;
-  afterLine: number | null;
-}
-
-export interface LineDiff {
-  lines: DiffLine[];
-  added: number;
-  removed: number;
-}
+export type { DiffLine, DiffLineType, LineDiff, DraftRevisionDiff } from '@nexa/shared';
 
 export type DraftRevisionSnapshot = Pick<KnowledgeDraft, 'revision' | 'title' | 'content'>;
-
-export interface DraftRevisionDiff {
-  fromRevision: number;
-  toRevision: number;
-  titleChanged: boolean;
-  title: { before: string; after: string };
-  content: LineDiff;
-}
 
 // Bounds the LCS table (about 16 MB) so oversized inputs degrade to a full replacement.
 const maxComparisonCells = 4_000_000;

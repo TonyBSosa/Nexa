@@ -1,4 +1,4 @@
-import type { ApprovalDecision } from '@nexa/shared';
+import type { ApprovalDecision, DraftReviewDecision } from '@nexa/shared';
 import { invalidRequest, optionalText, requireObject, requirePositiveInteger, requireText } from './inputValidation.js';
 import { splitLines } from './revisionDiff.js';
 import { DomainError } from './workflow.js';
@@ -8,12 +8,7 @@ const maxReviewers = 10;
 const maxCommentLength = 2_000;
 const decisions: readonly ApprovalDecision[] = ['APPROVED', 'CHANGES_REQUESTED', 'REJECTED'];
 
-export interface DraftReviewDecision {
-  actor: string;
-  decision: ApprovalDecision;
-  draftRevision: number;
-  comment: string | null;
-}
+export type { DraftReviewDecision } from '@nexa/shared';
 
 export interface DraftReviewDecisionContext {
   revisionUnderReview: number | null;

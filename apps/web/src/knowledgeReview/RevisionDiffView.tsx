@@ -1,9 +1,9 @@
-import type { RevisionDiffViewModel } from './types';
+import type { DraftRevisionDiff } from '@nexa/shared';
 import './knowledgeReview.css';
 
 const markers = { EQUAL: ' ', ADDED: '+', REMOVED: '−' } as const;
 
-export function RevisionDiffView({ diff }: { diff: RevisionDiffViewModel }) {
+export function RevisionDiffView({ diff }: { diff: DraftRevisionDiff }) {
   const { added, removed, lines } = diff.content;
   const unchanged = !diff.titleChanged && added === 0 && removed === 0;
   return <div className="kr-diff">

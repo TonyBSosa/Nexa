@@ -1,18 +1,14 @@
-import type { ApprovalDecision } from '@nexa/shared';
-import type { DecisionHistoryEntry } from './types';
+import type { ApprovalDecision, DecisionHistoryEntry } from '@nexa/shared';
 import './knowledgeReview.css';
-
 const decisionLabels: Record<ApprovalDecision, { label: string; tone: 'green' | 'amber' | 'red' }> = {
   APPROVED: { label: 'Aprobado', tone: 'green' },
   CHANGES_REQUESTED: { label: 'Cambios solicitados', tone: 'amber' },
   REJECTED: { label: 'Rechazado', tone: 'red' },
 };
-
 function formatDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('es');
 }
-
 export function DecisionHistory({ entries }: { entries: DecisionHistoryEntry[] }) {
   const ordered = [...entries].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   if (!ordered.length) return <p className="kr-empty">Todavía no hay decisiones registradas.</p>;
