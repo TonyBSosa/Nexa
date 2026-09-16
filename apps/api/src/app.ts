@@ -1,5 +1,6 @@
 import express from 'express';
 import { createReviewRouter } from './routes/review.js';
+import { createDraftReviewRouter } from './routes/draftReview.js';
 import { createAnalyticsRouter } from './routes/analytics.js';
 import type { ErrorRequestHandler } from 'express';
 import { healthRouter } from './routes/health.js';
@@ -15,9 +16,16 @@ import { DomainError } from './domain/workflow.js';
 export function createApp(provider: AgentProvider, repository: KnowledgeRepository) {
   const app = express();
   app.disable('x-powered-by');
+  // Evidence uploads carry base64 bytes, which inflate by about a third over
+  // the 25 MB video limit. These two routes parse first so the global 16 kB
+  // limit below never sees their body.
+  const evidenceJson = express.json({ limit: '36mb' });
+  app.post('/api/knowledge-gaps/:id/evidence-items', evidenceJson);
+  app.post('/api/knowledge-gaps/:id/evidence/:evidenceId/replace', evidenceJson);
   app.use(express.json({ limit: '16kb' }));
   app.use('/api', healthRouter);
   app.use('/api', createReviewRouter(repository));
+  app.use('/api', createDraftReviewRouter(repository));
   app.use('/api', createAnalyticsRouter(repository));
   app.use('/api', createChatRouter(new ChatService(provider, repository)));
   app.use('/api', createKnowledgeRouter(repository, new KnowledgeOperationsService(provider, repository)));

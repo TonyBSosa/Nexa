@@ -1,7 +1,14 @@
+import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import type { ReviewDetail, ReviewMetadata, ReviewDecisionRequest, ReviewFilters, ReviewList } from '@nexa/shared';
+import type {
+  AddDraftCommentRequest, AddEvidenceItemRequest, AssignReviewersRequest, ConfirmChecklistRequest,
+  DraftReviewDetail, ReplaceEvidenceRequest, WithdrawEvidenceRequest,
+} from '@nexa/shared';
 import { ReviewStore } from './review.js';
+import { DraftReviewStore } from './draftReview.js';
+import { EvidenceFileStore } from '../persistence/fileStore.js';
 import type {
   ActivityEvent, ActivityEventType, AddActivityRequest, AddEvidenceRequest, Approval, ApprovalRequest,
   ApprovalResult, ApprovedKnowledgeArticle, ChatResponse, CollectedEvidence, CreateManualActionRequest,
@@ -19,6 +26,11 @@ import {
   assertApprovalAllowed, assertDraftAllowed, assertEvidenceAllowed, assertOperationTransition,
   assertFreshDraft, assertTriageAllowed, DomainError, requireStatus,
 } from '../domain/workflow.js';
+import { assertReviewChecklistComplete } from '../domain/reviewChecklist.js';
+import { normalizeActor, sameActor, validateDraftReviewDecision } from '../domain/reviewRules.js';
+
+/** Uploads sit beside the database, under the repository-root data directory. */
+const defaultUploadsRoot = fileURLToPath(new URL('../../../../data/uploads', import.meta.url));
 
 export class PersistenceError extends Error {
   constructor() { super('No se pudo guardar o leer la información.'); }
@@ -30,6 +42,14 @@ export interface KnowledgeRepository {
   saveReview(id: string, metadata: ReviewMetadata): ReviewDetail;
   decideReview(id: string, request: ReviewDecisionRequest): ReviewDetail;
   confirmReview(id: string, revision: number, actor: string): ReviewDetail;
+  getDraftReview(id: string): DraftReviewDetail;
+  addEvidenceItem(id: string, request: AddEvidenceItemRequest): DraftReviewDetail;
+  withdrawEvidence(id: string, evidenceId: string, request: WithdrawEvidenceRequest): DraftReviewDetail;
+  replaceEvidence(id: string, evidenceId: string, request: ReplaceEvidenceRequest): DraftReviewDetail;
+  confirmChecklist(id: string, request: ConfirmChecklistRequest): DraftReviewDetail;
+  assignReviewers(id: string, request: AssignReviewersRequest): DraftReviewDetail;
+  addDraftComment(id: string, request: AddDraftCommentRequest): DraftReviewDetail;
+  readEvidenceFile(id: string, evidenceId: string): { bytes: Buffer; fileName: string; mimeType: string };
   record(message: string, response: ChatResponse, gapEligible: boolean, clientSessionId?: string): Query;
   listQueries(): Query[];
   listGaps(status?: KnowledgeGapStatus): KnowledgeGap[];
@@ -80,9 +100,22 @@ function gapFromRow(row: GapRow): KnowledgeGap {
 }
 
 export class SQLiteKnowledgeRepository implements KnowledgeRepository {
-  constructor(private readonly db: Database.Database, private readonly now: () => Date = () => new Date()) {}
+  constructor(
+    private readonly db: Database.Database,
+    private readonly now: () => Date = () => new Date(),
+    private readonly files: EvidenceFileStore = new EvidenceFileStore(defaultUploadsRoot),
+  ) {}
 
   private get reviews() { return new ReviewStore(this.db, this.now); }
+  private get draftReviews() { return new DraftReviewStore(this.db, this.now, this.files); }
+  getDraftReview(id: string): DraftReviewDetail { return this.guard(() => this.draftReviews.detail(id)); }
+  addEvidenceItem(id: string, request: AddEvidenceItemRequest): DraftReviewDetail { return this.guard(() => this.draftReviews.addEvidence(id, request)); }
+  withdrawEvidence(id: string, evidenceId: string, request: WithdrawEvidenceRequest): DraftReviewDetail { return this.guard(() => this.draftReviews.withdrawEvidence(id, evidenceId, request)); }
+  replaceEvidence(id: string, evidenceId: string, request: ReplaceEvidenceRequest): DraftReviewDetail { return this.guard(() => this.draftReviews.replaceEvidence(id, evidenceId, request)); }
+  confirmChecklist(id: string, request: ConfirmChecklistRequest): DraftReviewDetail { return this.guard(() => this.draftReviews.confirmChecklist(id, request.revision, request.confirmations)); }
+  assignReviewers(id: string, request: AssignReviewersRequest): DraftReviewDetail { return this.guard(() => this.draftReviews.assignReviewers(id, request.revision, request.submittedBy, request.reviewers)); }
+  addDraftComment(id: string, request: AddDraftCommentRequest): DraftReviewDetail { return this.guard(() => this.draftReviews.addComment(id, request)); }
+  readEvidenceFile(id: string, evidenceId: string) { return this.guard(() => this.draftReviews.readFile(id, evidenceId)); }
   getReview(id: string): ReviewDetail { return this.guard(() => this.reviews.detail(id)); }
   saveReview(id: string, metadata: ReviewMetadata): ReviewDetail { return this.guard(() => this.reviews.save(id, metadata)); }
   decideReview(id: string, request: ReviewDecisionRequest): ReviewDetail { return this.guard(() => this.reviews.decide(id, request)); }
@@ -230,7 +263,7 @@ export class SQLiteKnowledgeRepository implements KnowledgeRepository {
       ).all(id);
       return {
         ...gap, collectedInformation, drafts, currentDraft: drafts.at(-1) ?? null,
-        approvals: this.db.prepare<[string], Approval>('SELECT * FROM approvals WHERE knowledgeGapId = ? ORDER BY createdAt, rowid').all(id),
+        approvals: this.db.prepare<[string], Approval>('SELECT id, knowledgeGapId, decision, draftRevision, comment, actor, createdAt FROM approvals WHERE knowledgeGapId = ? ORDER BY createdAt, rowid').all(id),
         publishedArticle: article,
         contacts: contactsForGap(gap.suggestedDepartment, gap.suggestedExperts),
         activity,
@@ -335,6 +368,7 @@ export class SQLiteKnowledgeRepository implements KnowledgeRepository {
         assertFreshDraft(draft, row.evidenceRevision);
         const reviewed = this.db.prepare<[string], { revision: number }>('SELECT COALESCE(MAX(draftRevision), 0) AS revision FROM approvals WHERE knowledgeGapId = ?').get(id)!;
         if (draft!.revision <= reviewed.revision) throw new DomainError('STALE_STATE', 'Genere una revisión nueva antes de enviarla.');
+        assertReviewChecklistComplete(this.draftReviews.checklist(id));
       }
       if (request.toStatus === 'RESOLVED') this.assertPublication(row);
       const selected = selectedAction ? actionFromUnknown(JSON.parse(selectedAction), row, 0) : null;
@@ -528,7 +562,7 @@ export class SQLiteKnowledgeRepository implements KnowledgeRepository {
   approve(id: string, request: ApprovalRequest): ApprovalResult {
     return this.guard(() => this.db.transaction((): ApprovalResult => {
       const row = this.gapRow(id);
-      const prior = this.db.prepare<[string, number], Approval>('SELECT * FROM approvals WHERE knowledgeGapId = ? AND draftRevision = ?').get(id, request.draftRevision);
+      const prior = this.db.prepare<[string, number], Approval>('SELECT id, knowledgeGapId, decision, draftRevision, comment, actor, createdAt FROM approvals WHERE knowledgeGapId = ? AND draftRevision = ?').get(id, request.draftRevision);
       if (prior?.decision === 'APPROVED' && (row.status === 'PUBLISHED' || row.status === 'RESOLVED')) {
         if (request.decision !== 'APPROVED') throw new DomainError('INVALID_TRANSITION', 'No se puede cambiar una aprobación publicada.');
         const priorArticle = this.assertPublication(row, request.draftRevision);
@@ -539,12 +573,29 @@ export class SQLiteKnowledgeRepository implements KnowledgeRepository {
       assertApprovalAllowed(row.status);
       if (prior) throw new DomainError('STALE_STATE', 'Esta revisión de borrador ya fue decidida; genere una revisión nueva.');
       const now = this.now().toISOString();
+      // The author may never decide on their own draft. When no reviewers were
+      // assigned, any other declared person may, so the rule holds without
+      // forcing every gap through the assignment step.
+      const context = this.draftReviews.decisionContext(id);
+      const actor = normalizeActor(request.actor, 'actor');
+      if (context.submittedBy && sameActor(actor, context.submittedBy)) {
+        throw new DomainError('APPROVAL_REQUIRED', 'El autor del contenido no puede decidir sobre su propia revisión.');
+      }
+      if (context.assignedReviewers.length > 0) {
+        validateDraftReviewDecision({ ...context, revisionAlreadyDecided: false }, {
+          actor, decision: request.decision,
+          draftRevision: request.draftRevision, comment: request.comment ?? null,
+        });
+      }
+      const reviewed = context.assignedReviewers.length > 0;
       const approval: Approval = {
         id: randomUUID(), knowledgeGapId: id, decision: request.decision,
-        draftRevision: request.draftRevision, comment: request.comment?.trim() || null, createdAt: now,
+        draftRevision: request.draftRevision, comment: request.comment?.trim() || null,
+        actor, createdAt: now,
       };
-      this.db.prepare(`INSERT INTO approvals (id, knowledgeGapId, decision, draftRevision, comment, createdAt)
-        VALUES (@id, @knowledgeGapId, @decision, @draftRevision, @comment, @createdAt)`).run(approval);
+      this.db.prepare(`INSERT INTO approvals (id, knowledgeGapId, decision, draftRevision, comment, createdAt, actor)
+        VALUES (@id, @knowledgeGapId, @decision, @draftRevision, @comment, @createdAt, @actor)`).run(approval);
+      if (reviewed) this.draftReviews.releaseRevision(id);
       if (request.decision !== 'APPROVED') {
         this.db.prepare("UPDATE knowledge_gaps SET status = 'KNOWLEDGE_COLLECTED', updatedAt = ? WHERE id = ?").run(now, id);
         return { approval, gapStatus: 'KNOWLEDGE_COLLECTED', publication: null };
@@ -570,7 +621,7 @@ export class SQLiteKnowledgeRepository implements KnowledgeRepository {
     const draft = this.latestDraft(row.id);
     assertFreshDraft(draft, row.evidenceRevision, requestedRevision);
     const article = this.db.prepare<[string], ApprovedKnowledgeArticle>('SELECT * FROM approved_knowledge WHERE sourceKnowledgeGapId = ?').get(row.id);
-    const approval = this.db.prepare<[string, number], Approval>('SELECT * FROM approvals WHERE knowledgeGapId = ? AND draftRevision = ?').get(row.id, draft!.revision);
+    const approval = this.db.prepare<[string, number], Approval>('SELECT id, knowledgeGapId, decision, draftRevision, comment, actor, createdAt FROM approvals WHERE knowledgeGapId = ? AND draftRevision = ?').get(row.id, draft!.revision);
     if (!article || approval?.decision !== 'APPROVED' || article.approvedDraftRevision !== draft!.revision
       || article.revision !== 1 || !article.articleId || article.normalizedQuestionKey !== row.normalizedQuestionKey
       || article.title !== draft!.title || article.content !== draft!.content) {

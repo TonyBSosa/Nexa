@@ -13,3 +13,11 @@ export function acceptAndClassify(repository: SQLiteKnowledgeRepository, id: str
   repository.saveReview(id, metadataFor(repository, id));
   repository.confirmReview(id, repository.getReview(id).review.revision, 'Clasificador sintético');
 }
+
+/** The checklist now gates every submission, so fixtures confirm it explicitly. */
+export function confirmChecklist(repository: SQLiteKnowledgeRepository, id: string) {
+  repository.confirmChecklist(id, {
+    revision: repository.getDraftReview(id).state.revision,
+    confirmations: { answerClear: true, noImproperConfidentialInfo: true, readyForReview: true },
+  });
+}

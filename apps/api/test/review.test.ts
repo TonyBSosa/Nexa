@@ -159,7 +159,7 @@ test('HTTP review validates actors, dates, filters, stale edits and exposes safe
 test('legacy TRIAGED gaps require classification without inventing reviewer identity', t => {
   const { db, repository, create } = fixture(t); const id = create();
   // A current store can be reopened repeatedly; a pre-migration snapshot has no review rows.
-  assert.equal(db.pragma('user_version', { simple: true }), 5);
+  assert.equal(db.pragma('user_version', { simple: true }), 6);
   db.prepare("UPDATE knowledge_gaps SET status = 'TRIAGED' WHERE id = ?").run(id);
   assert.equal(repository.getReview(id).review.disposition, 'ACCEPTED');
   assert.equal(repository.getReview(id).review.classifiedBy, null);
@@ -181,7 +181,7 @@ test('schema v3 migrates non-destructively and reopens with persistent review hi
     db.exec('DROP TABLE gap_review_events; DROP TABLE gap_reviews; PRAGMA user_version = 3;');
     db.close(); db = openDatabase(path);
     let migrated = new SQLiteKnowledgeRepository(db);
-    assert.equal(db.pragma('user_version', { simple: true }), 5);
+    assert.equal(db.pragma('user_version', { simple: true }), 6);
     assert.deepEqual(migrated.getGap(id), before);
     assert.equal(migrated.getReview(id).review.revision, 0);
     migrated.decideReview(id, { revision: 0, actor: 'Revisor sintético', decision: 'DISCARD_NOT_APPLICABLE', reason: 'Fuera de alcance' });
@@ -201,11 +201,11 @@ test('schema v4 from either branch migrates missing review or activity tables', 
       status: 'INSUFFICIENT', organizationallyRelevant: true, evidence: [] }, true).knowledgeGapId!;
     db.exec('DROP TABLE gap_review_events; DROP TABLE gap_reviews; PRAGMA user_version = 4;');
     db.close(); db = openDatabase(path);
-    assert.equal(db.pragma('user_version', { simple: true }), 5);
+    assert.equal(db.pragma('user_version', { simple: true }), 6);
     assert.equal(new SQLiteKnowledgeRepository(db).getReview(id).review.revision, 0);
     db.exec('DROP TABLE recovery_activity; PRAGMA user_version = 4;');
     db.close(); db = openDatabase(path);
-    assert.equal(db.pragma('user_version', { simple: true }), 5);
+    assert.equal(db.pragma('user_version', { simple: true }), 6);
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('recovery_activity', 'gap_reviews') ORDER BY name")
       .all() as Array<{ name: string }>;
     assert.deepEqual(tables.map(row => row.name), ['gap_reviews', 'recovery_activity']);

@@ -2,13 +2,25 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+/**
+ * ALTER TABLE ADD COLUMN is not idempotent, and a database can reach an upgrade
+ * block already carrying some columns. Only the missing ones are added.
+ */
+function addMissingColumns(db: Database.Database, table: string, columns: Record<string, string>): string {
+  const existing = new Set(db.prepare<[], { name: string }>(`PRAGMA table_info(${table})`).all().map(column => column.name));
+  return Object.entries(columns)
+    .filter(([name]) => !existing.has(name))
+    .map(([name, definition]) => `ALTER TABLE ${table} ADD COLUMN ${name} ${definition};`)
+    .join('\n');
+}
+
 export function openDatabase(path: string): Database.Database {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path);
   try {
     db.pragma('foreign_keys = ON');
     const version = db.pragma('user_version', { simple: true });
-    if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5) {
+    if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6) {
       throw new Error('Unsupported database schema version.');
     }
     if (version === 0) db.transaction(() => {
@@ -57,6 +69,21 @@ export function openDatabase(path: string): Database.Database {
           reference TEXT,
           revision INTEGER NOT NULL CHECK (revision > 0),
           createdAt TEXT NOT NULL,
+          evidenceType TEXT,
+          contentKind TEXT,
+          author TEXT,
+          evidenceDate TEXT,
+          note TEXT,
+          url TEXT,
+          fileName TEXT,
+          mimeType TEXT,
+          sizeBytes INTEGER,
+          meeting TEXT,
+          version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+          supersededBy TEXT,
+          withdrawnAt TEXT,
+          withdrawnBy TEXT,
+          withdrawalJustification TEXT,
           UNIQUE (knowledgeGapId, revision)
         );
         CREATE TABLE knowledge_drafts (
@@ -77,6 +104,7 @@ export function openDatabase(path: string): Database.Database {
           draftRevision INTEGER NOT NULL CHECK (draftRevision > 0),
           comment TEXT,
           createdAt TEXT NOT NULL,
+          actor TEXT,
           UNIQUE (knowledgeGapId, draftRevision)
         );
         CREATE TABLE approved_knowledge (
@@ -112,7 +140,28 @@ export function openDatabase(path: string): Database.Database {
           createdAt TEXT NOT NULL
         );
         CREATE INDEX review_events_by_gap ON gap_review_events(knowledgeGapId, id);
-        PRAGMA user_version = 5;
+        CREATE TABLE IF NOT EXISTS draft_reviews (
+          knowledgeGapId TEXT PRIMARY KEY REFERENCES knowledge_gaps(id),
+          revision INTEGER NOT NULL CHECK (revision >= 0),
+          submittedBy TEXT,
+          submittedAt TEXT,
+          revisionUnderReview INTEGER CHECK (revisionUnderReview > 0),
+          assignedReviewers TEXT NOT NULL CHECK (json_valid(assignedReviewers)),
+          confirmations TEXT NOT NULL CHECK (json_valid(confirmations))
+        );
+        CREATE TABLE IF NOT EXISTS draft_review_comments (
+          id TEXT PRIMARY KEY,
+          knowledgeGapId TEXT NOT NULL REFERENCES knowledge_gaps(id),
+          draftRevision INTEGER NOT NULL CHECK (draftRevision > 0),
+          actor TEXT NOT NULL,
+          startLine INTEGER,
+          endLine INTEGER,
+          quote TEXT,
+          body TEXT NOT NULL,
+          createdAt TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS draft_comments_by_gap ON draft_review_comments(knowledgeGapId, draftRevision, id);
+        PRAGMA user_version = 6;
       `);
     })();
     if (version === 1) db.transaction(() => {
@@ -197,6 +246,42 @@ export function openDatabase(path: string): Database.Database {
         );
         CREATE INDEX IF NOT EXISTS review_events_by_gap ON gap_review_events(knowledgeGapId, id);
         PRAGMA user_version = 5;
+      `);
+    })();
+    if (version >= 1 && version <= 5) db.transaction(() => {
+      const evidenceColumns = addMissingColumns(db, 'collected_evidence', {
+        evidenceType: 'TEXT', contentKind: 'TEXT', author: 'TEXT', evidenceDate: 'TEXT', note: 'TEXT',
+        url: 'TEXT', fileName: 'TEXT', mimeType: 'TEXT', sizeBytes: 'INTEGER', meeting: 'TEXT',
+        version: 'INTEGER NOT NULL DEFAULT 1 CHECK (version > 0)', supersededBy: 'TEXT',
+        withdrawnAt: 'TEXT', withdrawnBy: 'TEXT', withdrawalJustification: 'TEXT',
+      });
+      const approvalColumns = addMissingColumns(db, 'approvals', { actor: 'TEXT' });
+      db.exec(`
+        ${evidenceColumns}
+        ${approvalColumns}
+        UPDATE collected_evidence SET evidenceType = 'MANUAL_TEXT', contentKind = 'TEXT' WHERE evidenceType IS NULL;
+        CREATE TABLE IF NOT EXISTS draft_reviews (
+          knowledgeGapId TEXT PRIMARY KEY REFERENCES knowledge_gaps(id),
+          revision INTEGER NOT NULL CHECK (revision >= 0),
+          submittedBy TEXT,
+          submittedAt TEXT,
+          revisionUnderReview INTEGER CHECK (revisionUnderReview > 0),
+          assignedReviewers TEXT NOT NULL CHECK (json_valid(assignedReviewers)),
+          confirmations TEXT NOT NULL CHECK (json_valid(confirmations))
+        );
+        CREATE TABLE IF NOT EXISTS draft_review_comments (
+          id TEXT PRIMARY KEY,
+          knowledgeGapId TEXT NOT NULL REFERENCES knowledge_gaps(id),
+          draftRevision INTEGER NOT NULL CHECK (draftRevision > 0),
+          actor TEXT NOT NULL,
+          startLine INTEGER,
+          endLine INTEGER,
+          quote TEXT,
+          body TEXT NOT NULL,
+          createdAt TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS draft_comments_by_gap ON draft_review_comments(knowledgeGapId, draftRevision, id);
+        PRAGMA user_version = 6;
       `);
     })();
     return db;

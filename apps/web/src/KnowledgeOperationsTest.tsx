@@ -8,6 +8,7 @@ import {
   Phone, RefreshCw, Trash2, UserRound, Workflow,
 } from 'lucide-react';
 import { GapReviewPanel } from './GapReviewPanel';
+import { DraftReviewPanel } from './knowledgeReview/DraftReviewPanel';
 
 const lifecycle: Array<[KnowledgeGapStatus, string]> = [
   ['DETECTED', 'Detectado'], ['TRIAGED', 'Clasificado'], ['ACTION_PROPOSED', 'Acción propuesta'],
@@ -585,12 +586,8 @@ export function KnowledgeOperationsTest({ initialGapId = '' }: { initialGapId?: 
                 {draft && <button className="button primary" disabled={busy} onClick={() => void run('/transition', 'POST', { fromStatus: 'KNOWLEDGE_COLLECTED', toStatus: 'AWAITING_APPROVAL' })}>Enviar a aprobación</button>}
               </>
             )}
-            {gap.status === 'AWAITING_APPROVAL' && draft && (
-              <>
-                <button className="button secondary" disabled={busy} onClick={() => void run('/approval', 'POST', { decision: 'CHANGES_REQUESTED', draftRevision: draft.revision, comment: 'Preparar una revisión nueva.' })}>Solicitar cambios</button>
-                <button className="button danger" disabled={busy} onClick={() => void run('/approval', 'POST', { decision: 'REJECTED', draftRevision: draft.revision, comment: 'Rechazado en revisión humana.' })}>Rechazar</button>
-                <button className="button primary" disabled={busy} onClick={() => void run('/approval', 'POST', { decision: 'APPROVED', draftRevision: draft.revision, comment: 'Validado manualmente.' })}><Check size={15} /> Aprobar y publicar</button>
-              </>
+            {(gap.status === 'IN_PROGRESS' || gap.status === 'KNOWLEDGE_COLLECTED' || gap.status === 'AWAITING_APPROVAL') && (
+              <DraftReviewPanel gap={gap} refresh={() => refresh(gap.id)} />
             )}
             {gap.status === 'PUBLISHED' && (
               <button className="button primary" disabled={busy} onClick={() => void run('/transition', 'POST', { fromStatus: 'PUBLISHED', toStatus: 'RESOLVED' })}>Cerrar brecha explícitamente</button>

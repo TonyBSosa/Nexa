@@ -108,6 +108,8 @@ export interface Approval {
   decision: ApprovalDecision;
   draftRevision: number;
   comment: string | null;
+  /** Declared name of whoever decided; never a verified identity. */
+  actor: string | null;
   createdAt: string;
 }
 
@@ -196,6 +198,8 @@ export interface ApprovalRequest {
   decision: ApprovalDecision;
   draftRevision: number;
   comment?: string;
+  /** Required once reviewers were assigned through the draft review panel. */
+  actor?: string;
 }
 
 export interface ApprovalResult {

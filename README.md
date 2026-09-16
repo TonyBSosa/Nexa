@@ -4,6 +4,8 @@ NEXA is an organizational knowledge intelligence concept that turns questions an
 
 ## Current Stage
 
+Evidence and draft review: evidence now records its type, authorship, date and file or meeting details, keeps versions, and can be withdrawn or replaced without deleting history. A draft revision is submitted to named reviewers, gated by a review checklist, commented by line range, and decided with attribution. Any evidence change invalidates the draft that used it. Real external actions, authentication and verified identity remain pending.
+
 Knowledge Recovery Loop: SQLite-backed gaps now progress through triage, recovery, evidence collection, versioned drafting, human review, local publication, and explicit resolution. Published articles immediately answer matching chat questions through NEXA Approved Knowledge. Employee questions use the NEXA React assistant, Express backend, and Botpress provider by default. FakeAgentProvider is reserved for automated tests. Real external actions, authentication, Tailwind/shadcn, and Docker remain pending.
 
 ## Prerequisites

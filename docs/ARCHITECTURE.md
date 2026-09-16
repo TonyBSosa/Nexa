@@ -82,10 +82,11 @@ SQLite is sufficient for the MVP. No SQL or ORM choice is prescribed here.
 - **Query:** question, answer/outcome, category, source references, optional gap link, timestamp. Provider outages are errors, not evidence-insufficiency outcomes.
 - **KnowledgeGap:** id, original question, deterministic normalizedQuestionKey, separate AI-generated display title, category, status, priority, occurrences, evidenceRevision, suggested department/experts, timestamps, and associated actions, information, draft, and approvals.
 - **SuggestedAction:** type, description, simulation/approval record. Suggestions do not execute themselves.
-- **CollectedInformation:** text, stated origin, collection timestamp, gap link.
+- **CollectedInformation:** text, stated origin, collection timestamp, gap link. Since schema 6 it also records evidence type, author, evidence date, note, link, file metadata or meeting details, its own version, and withdrawal or supersession. File bytes are not stored. Any change advances the gap evidenceRevision and therefore invalidates the draft that used it.
+- **DraftReview:** reviewers assigned to a draft revision, who submitted it, the checklist confirmations, and an optimistic revision counter. Comments may be anchored to a line range of the locked revision. Separate from the triage review of the request, which has its own storage and routes.
 - **KnowledgeDraft:** title, content, revision, evidenceRevision used to produce it, gap link, and published article id/revision when successful.
 - **ApprovedKnowledgeArticle:** stable article id, article revision, title, content, originating gap/draft revision, and publication timestamp. Stored in the backend-owned NEXA Approved Knowledge store in SQLite; source metadata alone is not article identity.
-- **Approval:** decision, draft revision, optional comment, timestamp. It records a demo human interaction, not verified identity.
+- **Approval:** decision, draft revision, optional comment, timestamp, and the reviewer who decided when the draft review panel assigned reviewers. It records a demo human interaction, not verified identity.
 - **KnowledgeSource:** display metadata and actual integration state; unavailable future sources remain not configured.
 
 Use query-to-gap links plus a gap occurrence counter; no separate occurrence table unless implementation demonstrates a concrete need. With Botpress, create a gap only after two fresh, valid assessments both report organizationally relevant INSUFFICIENT. Greetings, unrelated questions, provider failures, malformed responses, inconsistent confirmations, and source failures never create gaps.
