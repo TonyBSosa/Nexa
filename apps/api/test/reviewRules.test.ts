@@ -2,16 +2,16 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   assertRevisionUnderReview, normalizeActor, sameActor, validateContentComment,
-  validateReviewDecision, validateReviewerAssignment,
+  validateDraftReviewDecision, validateReviewerAssignment,
 } from '../src/domain/reviewRules.js';
-import type { ReviewDecisionContext } from '../src/domain/reviewRules.js';
+import type { DraftReviewDecisionContext } from '../src/domain/reviewRules.js';
 import { DomainError } from '../src/domain/workflow.js';
 
 function code(expected: DomainError['code']) {
   return (error: unknown) => error instanceof DomainError && error.code === expected;
 }
 
-function context(overrides: Partial<ReviewDecisionContext> = {}): ReviewDecisionContext {
+function context(overrides: Partial<DraftReviewDecisionContext> = {}): DraftReviewDecisionContext {
   return {
     revisionUnderReview: 2,
     submittedBy: 'Ana Documentación',
@@ -51,47 +51,47 @@ test('only the locked revision under review can be addressed', () => {
 });
 
 test('an assigned reviewer can approve with an optional comment', () => {
-  assert.deepEqual(validateReviewDecision(context(), { actor: 'marta revisora', decision: 'APPROVED', draftRevision: 2 }), {
+  assert.deepEqual(validateDraftReviewDecision(context(), { actor: 'marta revisora', decision: 'APPROVED', draftRevision: 2 }), {
     actor: 'marta revisora', decision: 'APPROVED', draftRevision: 2, comment: null,
   });
-  assert.equal(validateReviewDecision(context(), {
+  assert.equal(validateDraftReviewDecision(context(), {
     actor: 'Pedro Revisor', decision: 'APPROVED', draftRevision: 2, comment: ' Correcto. ',
   }).comment, 'Correcto.');
 });
 
 test('changes requested and rejection require a comment', () => {
   for (const decision of ['CHANGES_REQUESTED', 'REJECTED']) {
-    assert.throws(() => validateReviewDecision(context(), { actor: 'Marta Revisora', decision, draftRevision: 2 }), code('INVALID_REQUEST'));
-    assert.throws(() => validateReviewDecision(context(), { actor: 'Marta Revisora', decision, draftRevision: 2, comment: '  ' }), code('INVALID_REQUEST'));
-    assert.equal(validateReviewDecision(context(), {
+    assert.throws(() => validateDraftReviewDecision(context(), { actor: 'Marta Revisora', decision, draftRevision: 2 }), code('INVALID_REQUEST'));
+    assert.throws(() => validateDraftReviewDecision(context(), { actor: 'Marta Revisora', decision, draftRevision: 2, comment: '  ' }), code('INVALID_REQUEST'));
+    assert.equal(validateDraftReviewDecision(context(), {
       actor: 'Marta Revisora', decision, draftRevision: 2, comment: 'Aclarar el paso 3.',
     }).comment, 'Aclarar el paso 3.');
   }
 });
 
 test('authors and unassigned actors cannot decide', () => {
-  assert.throws(() => validateReviewDecision(context({ assignedReviewers: ['Ana Documentación'] }), {
+  assert.throws(() => validateDraftReviewDecision(context({ assignedReviewers: ['Ana Documentación'] }), {
     actor: 'ANA documentación', decision: 'APPROVED', draftRevision: 2,
   }), code('APPROVAL_REQUIRED'));
-  assert.throws(() => validateReviewDecision(context({ assignedReviewers: ['Luis Redactor'] }), {
+  assert.throws(() => validateDraftReviewDecision(context({ assignedReviewers: ['Luis Redactor'] }), {
     actor: 'Luis Redactor', decision: 'REJECTED', draftRevision: 2, comment: 'No.',
   }), code('APPROVAL_REQUIRED'));
-  assert.throws(() => validateReviewDecision(context(), {
+  assert.throws(() => validateDraftReviewDecision(context(), {
     actor: 'Invitado', decision: 'APPROVED', draftRevision: 2,
   }), code('APPROVAL_REQUIRED'));
 });
 
 test('decisions reject stale, already decided, or malformed requests', () => {
-  assert.throws(() => validateReviewDecision(context(), { actor: 'Marta Revisora', decision: 'APPROVED', draftRevision: 1 }), code('STALE_STATE'));
-  assert.throws(() => validateReviewDecision(context({ revisionAlreadyDecided: true }), {
+  assert.throws(() => validateDraftReviewDecision(context(), { actor: 'Marta Revisora', decision: 'APPROVED', draftRevision: 1 }), code('STALE_STATE'));
+  assert.throws(() => validateDraftReviewDecision(context({ revisionAlreadyDecided: true }), {
     actor: 'Marta Revisora', decision: 'APPROVED', draftRevision: 2,
   }), code('STALE_STATE'));
-  assert.throws(() => validateReviewDecision(context({ revisionUnderReview: null }), {
+  assert.throws(() => validateDraftReviewDecision(context({ revisionUnderReview: null }), {
     actor: 'Marta Revisora', decision: 'APPROVED', draftRevision: 2,
   }), code('INVALID_TRANSITION'));
-  assert.throws(() => validateReviewDecision(context(), { actor: 'Marta Revisora', decision: 'MAYBE', draftRevision: 2 }), code('INVALID_REQUEST'));
-  assert.throws(() => validateReviewDecision(context(), { actor: 'Marta Revisora', decision: 'APPROVED', draftRevision: 0 }), code('INVALID_REQUEST'));
-  assert.throws(() => validateReviewDecision(context(), { actor: 'Marta Revisora', decision: 'APPROVED', draftRevision: 2, extra: true }), code('INVALID_REQUEST'));
+  assert.throws(() => validateDraftReviewDecision(context(), { actor: 'Marta Revisora', decision: 'MAYBE', draftRevision: 2 }), code('INVALID_REQUEST'));
+  assert.throws(() => validateDraftReviewDecision(context(), { actor: 'Marta Revisora', decision: 'APPROVED', draftRevision: 0 }), code('INVALID_REQUEST'));
+  assert.throws(() => validateDraftReviewDecision(context(), { actor: 'Marta Revisora', decision: 'APPROVED', draftRevision: 2, extra: true }), code('INVALID_REQUEST'));
 });
 
 test('general content comments need no anchor', () => {

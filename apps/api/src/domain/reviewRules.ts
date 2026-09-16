@@ -8,14 +8,14 @@ const maxReviewers = 10;
 const maxCommentLength = 2_000;
 const decisions: readonly ApprovalDecision[] = ['APPROVED', 'CHANGES_REQUESTED', 'REJECTED'];
 
-export interface ReviewDecision {
+export interface DraftReviewDecision {
   actor: string;
   decision: ApprovalDecision;
   draftRevision: number;
   comment: string | null;
 }
 
-export interface ReviewDecisionContext {
+export interface DraftReviewDecisionContext {
   revisionUnderReview: number | null;
   submittedBy: string;
   draftAuthors: string[];
@@ -72,7 +72,7 @@ export function validateReviewerAssignment(submittedBy: string, draftAuthors: st
   return normalized;
 }
 
-export function validateReviewDecision(context: ReviewDecisionContext, input: unknown): ReviewDecision {
+export function validateDraftReviewDecision(context: DraftReviewDecisionContext, input: unknown): DraftReviewDecision {
   const value = requireObject(input, ['actor', 'decision', 'draftRevision', 'comment']);
   const actor = normalizeActor(value.actor);
   if (!decisions.includes(value.decision as ApprovalDecision)) return invalidRequest('decision no es válida.');
